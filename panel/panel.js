@@ -5,7 +5,7 @@ const DATA = { day: [], week: [], all: null, monthAppts: [], expenses: [] };
 const app = () => document.getElementById('app');
 const pill = s => ({ bekliyor: '<span class="pill p-wait">Bekliyor</span>', geldi: '<span class="pill p-ok">Geldi</span>', gelmedi: '<span class="pill p-no">Gelmedi</span>', iptal: '<span class="pill p-warn">İptal</span>' }[s]);
 const header = () => `<header class="hero"><span class="eyebrow">Berber paneli</span><h1>${esc(SHOP ? SHOP.name : 'Berberim')}</h1></header>`;
-function failBox(msg) { app().innerHTML = header() + `<section class="box" style="text-align:center"><p style="margin:0">${esc(msg)}</p><button class="btn" onclick="location.reload()">Tekrar dene</button></section>`; }
+function failBox(msg, e) { app().innerHTML = header() + `<section class="box" style="text-align:center"><p style="margin:0">${esc(msg)}</p><p class="meta" style="margin:0;font-size:11px;opacity:.7">${esc((e && (e.message || e.code)) || '')}</p><button class="btn" onclick="location.reload()">Tekrar dene</button></section>`; }
 
 /* ---------- Giriş ---------- */
 async function boot() {
@@ -17,7 +17,7 @@ async function boot() {
     await loadShop();
     await refresh();
     setInterval(() => { if (!document.hidden && !P.adding && P.edit === null && P.tab === 'gun') refresh(true); }, 60000);
-  } catch (e) { failBox('Bağlantı kurulamadı. İnternetinizi kontrol edin.'); }
+  } catch (e) { failBox('Bağlantı kurulamadı. İnternetinizi kontrol edin.', e); }
 }
 async function logout() { await SB.auth.signOut(); location.reload(); }
 function renderLogin(msg) {

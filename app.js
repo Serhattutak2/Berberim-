@@ -24,7 +24,7 @@ async function init() {
     document.title = SHOP.name + ' · Online Randevu';
     render();
   } catch (e) {
-    document.getElementById('app').innerHTML = `<section class="box" style="text-align:center"><h2 style="justify-content:center">Sayfa yüklenemedi</h2><p class="meta" style="margin:0">İnternet bağlantınızı kontrol edip tekrar deneyin.</p><button class="btn" onclick="location.reload()">Tekrar dene</button></section>`;
+    document.getElementById('app').innerHTML = `<section class="box" style="text-align:center"><h2 style="justify-content:center">Sayfa yüklenemedi</h2><p class="meta" style="margin:0">İnternet bağlantınızı kontrol edip tekrar deneyin.</p><p class="meta" style="margin:0;font-size:11px;opacity:.7">${esc((e && (e.message || e.code)) || '')}</p><button class="btn" onclick="location.reload()">Tekrar dene</button></section>`;
   }
 }
 
