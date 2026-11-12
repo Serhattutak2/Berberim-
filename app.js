@@ -13,7 +13,8 @@ const ERR = {
 const errText = e => { const k = Object.keys(ERR).find(k => (e && e.message || '').includes(k)); return k ? ERR[k] : 'Bağlantı sorunu oldu, lütfen tekrar deneyin.'; };
 
 let SHOP = null, BUSY = [], busyFor = null, loadingSlots = false;
-let me = store.get('berberim_me') || {};
+let me = { name: '', phone: '' };
+try { localStorage.removeItem('berberim_me'); } catch (e) {}
 const C = { svc: null, date: null, time: null, done: null, view: 'yeni', lookup: '', mine: null, err: '' };
 
 async function init() {
@@ -78,8 +79,8 @@ function render() {
   <section class="box"><h2><span class="n">2</span>Gün</h2><div class="chips">${days.map(x => `<button class="chip day ${x.s === C.date ? 'on' : ''}" data-day="${x.s}" ${x.closed ? 'disabled' : ''}><small>${x.s === ymd(new Date()) ? 'Bugün' : DSH[x.d.getDay()]}</small><b>${x.d.getDate()}</b><small>${x.closed ? 'Kapalı' : MONTHS[x.d.getMonth()].slice(0, 3)}</small></button>`).join('')}</div></section>
   <section class="box"><h2><span class="n">3</span>Saat</h2>${slotHtml}</section>
   <section class="box"><h2><span class="n">4</span>Bilgileriniz</h2>
-    <label for="cName">Ad soyad<input id="cName" autocomplete="name" maxlength="80" value="${esc(me.name)}" placeholder="Örn. Serhat Tutak"></label>
-    <label for="cPhone">Telefon (WhatsApp)<input id="cPhone" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" value="${esc(me.phone)}" placeholder="05xx xxx xx xx"></label>
+    <label for="cName">Ad soyad<input id="cName" autocomplete="off" maxlength="80" value="${esc(me.name)}" placeholder="Adınız ve soyadınız"></label>
+    <label for="cPhone">Telefon (WhatsApp)<input id="cPhone" type="tel" inputmode="tel" autocomplete="off" maxlength="20" value="${esc(me.phone)}" placeholder="05xx xxx xx xx"></label>
     ${C.time ? `<div class="summary"><b>${esc(fmtD(C.date))}</b>, saat <b>${C.time}</b> · ${esc(svc.name)}</div>` : '<p class="meta" style="margin:0">Önce bir saat seçin.</p>'}
     <p class="err" id="cErr" ${C.err ? '' : 'hidden'}>${esc(C.err)}</p>
     <button class="btn" id="book" ${C.time ? '' : 'disabled'}>Randevuyu onayla</button></section>`;
@@ -98,7 +99,7 @@ function render() {
     bk.disabled = true; bk.textContent = 'Kaydediliyor…';
     try {
       const r = await q(() => SB.rpc('book', { p_date: C.date, p_time: C.time, p_service: svc.id, p_name: name, p_phone: phone }), 2);
-      store.set('berberim_me', { name, phone });
+      me = { name: '', phone: '' };
       C.done = r; C.err = ''; busyFor = null; render(); window.scrollTo(0, 0);
     } catch (e) {
       C.err = errText(e); if ((e.message || '').includes('DOLU')) { C.time = null; busyFor = null; }
