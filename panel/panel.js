@@ -250,7 +250,7 @@ function tabSettings() {
   <section class="sec"><h2>Hizmetler</h2><div class="card"><div class="list">${svcDraft.map((s, i) => `<div class="item"><div class="main"><div class="row"><input id="vn${i}" maxlength="40" value="${esc(s.name)}" aria-label="Hizmet adı" style="flex:2 1 140px"><select id="vd${i}" aria-label="Süre" style="flex:1 1 90px">${[10, 15, 20, 30, 40, 45, 60, 75, 90, 120].map(v => `<option value="${v}" ${s.dur == v ? 'selected' : ''}>${v} dk</option>`).join('')}</select></div></div>${svcDraft.length > 1 ? `<button class="btn ghost sm" data-rm="${i}" aria-label="Sil">Sil</button>` : ''}</div>`).join('')}</div>
     <button class="btn ghost sm" id="addSvc">+ Hizmet ekle</button></div></section>
   <button class="btn" id="sv">Ayarları kaydet</button>
-  <section class="sec"><h2>Abonelik</h2><p class="muted">${d >= 0 ? `${esc(fmtDs(st.paid_until))} tarihine kadar geçerli (${d} gün kaldı).` : 'Süresi doldu.'}</p></section>
+  <section class="sec"><h2>Abonelik</h2><p class="muted">${String(st.paid_until) >= '2099' ? 'Süresiz.' : d >= 0 ? `${esc(fmtDs(st.paid_until))} tarihine kadar geçerli (${d} gün kaldı).` : 'Süresi doldu.'}</p></section>
   ${IS_SUPER ? '<a class="btn ghost" href="/patron/">Patron paneli</a>' : ''}
   <button class="btn ghost" id="lo">Çıkış yap</button>`;
   const $ = id => document.getElementById(id);

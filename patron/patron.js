@@ -48,7 +48,9 @@ function render() {
   tabbar.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; S.open = null; S.mode = null; window.scrollTo(0, 0); render(); });
   ({ berber: tabShops, para: tabPay, ayar: tabSettings })[S.tab]();
 }
+const isFree = s => String(s.paid_until) >= '2099';
 const status = s => {
+  if (isFree(s)) return '<span class="pill p-ok">Süresiz</span>';
   const d = daysUntil(s.paid_until);
   if (!s.active) return '<span class="pill p-no">Durduruldu</span>';
   if (d < 0) return '<span class="pill p-no">Süresi doldu</span>';
@@ -59,7 +61,7 @@ const status = s => {
 function tabShops() {
   const price = S.settings.yearly_price, year = String(new Date().getFullYear());
   const active = S.shops.filter(s => s.active && daysUntil(s.paid_until) >= 0).length;
-  const soon = S.shops.filter(s => s.active && daysUntil(s.paid_until) >= 0 && daysUntil(s.paid_until) <= 30).length;
+  const soon = S.shops.filter(s => !isFree(s) && s.active && daysUntil(s.paid_until) >= 0 && daysUntil(s.paid_until) <= 30).length;
   const yearRev = S.payments.filter(p => String(p.paid_on).startsWith(year)).reduce((a, p) => a + Number(p.amount), 0);
   const f = S.form;
   app.innerHTML = `<header class="head"><h1>Berberim Patron</h1><p>Berberlerin, abonelikler ve ödemeler.</p><div class="pole" aria-hidden="true"></div></header>
@@ -109,7 +111,7 @@ function shopItem(s, price) {
   const open = S.open === s.id, m = S.mode && S.open === s.id ? S.mode : null;
   return `<div class="item"><div class="main">
     <div class="sec-h"><b>${esc(s.name)}</b>${status(s)}</div>
-    <div class="muted small">${esc(fmtDs(s.paid_until))} bitiş · son 30 günde ${s.appts_30d} randevu · toplam ${tl(s.total_paid)}</div>
+    <div class="muted small">${isFree(s) ? 'Süresiz, ücretsiz' : esc(fmtDs(s.paid_until)) + ' bitiş'} · son 30 günde ${s.appts_30d} randevu · toplam ${tl(s.total_paid)}</div>
     ${open ? `<div class="note small">Link: ${esc(shopLinkFor(s.slug))}<br>Berber: ${esc((s.emails || []).join(', ') || '—')}${s.phone ? '<br>Tel: ' + esc(s.phone) : ''}${s.note ? '<br>Not: ' + esc(s.note) : ''}</div>
       ${m === 'extend' ? `<div class="row"><label for="xY">Süre<select id="xY">${[1, 2, 3].map(y => `<option value="${y}">${y} yıl</option>`).join('')}</select></label><label for="xA">Alınan (₺)<input id="xA" type="number" inputmode="numeric" value="${price}"></label></div>
         <div class="acts"><button class="btn ok sm" data-x="extendGo" data-id="${s.id}">Ödemeyi kaydet ve uzat</button><button class="btn ghost sm" data-x="cancel">Vazgeç</button></div>`
@@ -120,6 +122,7 @@ function shopItem(s, price) {
       : m === 'edit' ? `<label for="eN">Dükkan adı<input id="eN" value="${esc(s.name)}"></label><label for="eS">Link<input id="eS" value="${esc(s.slug)}"></label>
         <label for="eU">Bitiş tarihi<input id="eU" type="date" value="${s.paid_until}"></label><label for="eNo">Not<input id="eNo" value="${esc(s.note || '')}"></label>
         <div class="acts"><button class="btn dark sm" data-x="editGo" data-id="${s.id}">Kaydet</button><button class="btn ghost sm" data-x="cancel">Vazgeç</button></div>`
+      : isFree(s) ? `<div class="acts"><button class="btn ghost sm" data-x="copy" data-slug="${esc(s.slug)}">Linki kopyala</button><button class="btn ghost sm" data-x="pass" data-id="${s.id}">Şifre sıfırla</button><button class="btn ghost sm" data-x="member" data-id="${s.id}">Hesap ekle</button></div>`
       : `<div class="acts"><button class="btn ok sm" data-x="extend" data-id="${s.id}">+ Yıl ekle</button><button class="btn ghost sm" data-x="copy" data-slug="${esc(s.slug)}">Linki kopyala</button>
         <button class="btn ghost sm" data-x="pass" data-id="${s.id}">Şifre sıfırla</button><button class="btn ghost sm" data-x="member" data-id="${s.id}">Hesap ekle</button>
         <button class="btn ghost sm" data-x="edit" data-id="${s.id}">Düzenle</button><button class="btn ghost sm" data-x="toggle" data-id="${s.id}" data-on="${s.active ? 0 : 1}">${s.active ? 'Durdur' : 'Aç'}</button></div>`}` : ''}
