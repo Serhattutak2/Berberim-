@@ -228,3 +228,33 @@ textarea { min-height: 130px; resize: vertical; }
 }
 .foot { text-align: center; font-size: 12px; color: var(--muted); }
 .foot a { color: inherit; }
+
+/* Sade panel öğeleri */
+.daynav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; }
+.daynav b { font-size: 17px; }
+.kasa { background: var(--ink); color: var(--surface); border-radius: 18px; padding: 18px 20px; display: flex; flex-direction: column; gap: 2px; }
+.kasa span { font-size: 14px; opacity: .7; }
+.kasa b { font: 800 40px/1.1 var(--display); letter-spacing: -0.02em; }
+.kasa small { font-size: 14px; opacity: .75; }
+.bigmic { display: flex; align-items: center; justify-content: center; gap: 12px; width: 100%; border: 0; border-radius: 18px; padding: 18px; background: var(--red); color: #fff; font: 700 18px var(--body); cursor: pointer; }
+.bigmic svg { width: 28px; height: 28px; }
+.bigmic.rec { background: var(--ink); color: var(--surface); }
+@media (prefers-reduced-motion: no-preference) { .bigmic.rec svg { animation: pulse 1s ease-in-out infinite alternate; } }
+.okn { background: var(--ok-soft); color: var(--ok); font-weight: 600; }
+.appts { padding: 4px 14px; gap: 0; }
+.appt { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; padding: 10px 0; border-top: 1px solid var(--line); }
+.appt:first-child { border-top: 0; }
+.appt-row { display: flex; align-items: center; gap: 12px; background: none; border: 0; padding: 4px 0; text-align: left; cursor: pointer; min-width: 0; }
+.appt-row .t { font: 800 17px var(--display); min-width: 50px; font-variant-numeric: tabular-nums; }
+.appt-row .who { display: flex; flex-direction: column; min-width: 0; }
+.appt-row .who b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.appt-row .who small { color: var(--muted); font-size: 13px; }
+.appt.iptal .who b, .appt.gelmedi .who b { color: var(--muted); }
+.appt-more { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 8px; padding: 4px 0 6px 62px; }
+.appt-more .cmd input { max-width: 140px; padding: 8px 10px; }
+.fold { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); }
+.fold summary { padding: 15px 16px; font: 700 17px var(--display); cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; }
+.fold summary::-webkit-details-marker { display: none; }
+.fold summary::after { content: "+"; font-size: 22px; color: var(--muted); }
+.fold[open] summary::after { content: "−"; }
+.fold-in { padding: 0 16px 16px; display: flex; flex-direction: column; gap: 12px; }

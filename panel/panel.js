@@ -72,12 +72,7 @@ async function refresh(silent) {
   try {
     const sid = SHOP.id;
     if (P.tab === 'gun') {
-      const from = ymd(addDays(new Date(), -6));
-      const [day, week] = await Promise.all([
-        q(() => SB.from('appointments').select('*').eq('shop_id', sid).eq('date', P.date).order('time')),
-        q(() => SB.from('appointments').select('date').eq('shop_id', sid).gte('date', from).lte('date', ymd(new Date())).eq('status', 'geldi'))
-      ]);
-      DATA.day = day; DATA.week = week;
+      DATA.day = await q(() => SB.from('appointments').select('*').eq('shop_id', sid).eq('date', P.date).order('time'));
     } else if (P.tab === 'musteri') {
       DATA.all = await q(() => SB.from('appointments').select('name,phone,status,price,date').eq('shop_id', sid).order('date', { ascending: false }).limit(20000));
     } else if (P.tab === 'kasa') {
@@ -120,46 +115,47 @@ function subBanner() {
 const remindText = a => `Merhaba ${a.name.split(' ')[0]}, ${SHOP.name} randevunuzu hatırlatırız: ${fmtD(a.date)}, saat ${hm(a.time)} (${a.service}). Görüşmek üzere ✂️`;
 function tabDay() {
   const list = DATA.day, came = list.filter(a => a.status === 'geldi'), inc = came.reduce((s, a) => s + a.price, 0);
-  const waiting = list.filter(a => a.status === 'bekliyor').length, sv = SHOP.services, isToday = P.date === ymd(new Date());
+  const waiting = list.filter(a => a.status === 'bekliyor'), sv = SHOP.services, isToday = P.date === ymd(new Date());
   const nowHM = toHM(Math.round((new Date().getHours() * 60 + new Date().getMinutes()) / 15) * 15 % 1440);
-  const t = new Date(), week = [];
-  for (let i = 6; i >= 0; i--) { const d = addDays(t, -i), s = ymd(d); week.push({ label: i === 0 ? 'Bugün' : DSH[d.getDay()], value: DATA.week.filter(a => a.date === s).length, hl: i === 0 }); }
   const m = P.cmdMsg || {};
+  const row = a => {
+    const open = P.edit === a.id;
+    return `<div class="appt ${a.status}">
+      <button class="appt-row" data-open="${a.id}" aria-expanded="${open}"><span class="t">${hm(a.time)}</span><span class="who"><b>${esc(a.name)}</b><small>${esc(a.service)}</small></span>${a.status === 'bekliyor' ? '' : pill(a.status)}</button>
+      ${a.status === 'bekliyor' ? `<button class="btn ok sm" data-st="geldi" data-id="${a.id}">Geldi</button>` : `<span class="money muted">${a.status === 'geldi' ? tl(a.price) : ''}</span>`}
+      ${open ? `<div class="appt-more">
+        ${a.status === 'geldi' ? `<div class="cmd"><input id="pe" type="number" inputmode="numeric" value="${a.price}" aria-label="Ücret"><button class="btn dark sm" id="peS">Ücreti kaydet</button></div>` : ''}
+        <div class="acts">${a.status === 'bekliyor' ? `<button class="btn ghost sm" data-st="gelmedi" data-id="${a.id}">Gelmedi</button><button class="btn ghost sm" data-st="iptal" data-id="${a.id}">İptal</button>` : `<button class="btn ghost sm" data-st="bekliyor" data-id="${a.id}">Geri al</button>`}
+        ${a.phone ? `<a class="btn ghost sm" target="_blank" rel="noopener" href="https://wa.me/${waNum(a.phone)}?text=${encodeURIComponent(remindText(a))}">WhatsApp</a><a class="btn ghost sm" href="tel:${esc(digits(a.phone))}">Ara</a>` : ''}</div>
+        ${a.phone ? `<p class="muted small">${esc(a.phone)}</p>` : ''}</div>` : ''}
+    </div>`;
+  };
   app.innerHTML = `<header class="head"><h1>${esc(SHOP.name)}</h1>
-    <div class="sec-h" style="margin-top:6px"><button class="btn ghost sm" id="pv" aria-label="Önceki gün">‹</button><b>${isToday ? 'Bugün, ' : ''}${esc(fmtD(P.date))}</b><button class="btn ghost sm" id="nx" aria-label="Sonraki gün">›</button></div></header>
+    <div class="daynav"><button class="btn ghost sm" id="pv" aria-label="Önceki gün">‹</button><b>${isToday ? 'Bugün' : esc(fmtD(P.date))}</b><button class="btn ghost sm" id="nx" aria-label="Sonraki gün">›</button></div></header>
   ${subBanner()}
-  <div class="stats"><div class="stat hero"><b class="money">${tl(inc)}</b><span>${isToday ? 'Bugünün kasası' : 'Günün kasası'}</span></div>
-    <div class="stat"><b>${came.length}</b><span>Gelen</span></div><div class="stat"><b>${waiting}</b><span>Bekleyen</span></div><div class="stat"><b>${list.filter(a => a.status === 'gelmedi').length}</b><span>Gelmeyen</span></div></div>
-  <section class="sec"><h2>Hızlı kayıt</h2>
-    <div class="cmd">${SR ? `<button class="mic ${listening ? 'rec' : ''}" id="mic" aria-label="${listening ? 'Dinlemeyi bitir' : 'Konuşarak kaydet'}">${listening ? ICON.stop : ICON.mic}</button>` : ''}
-      <input id="cmd" placeholder="saat 3'te Ahmet Yılmaz geldi 600" aria-label="Komut"><button class="btn dark" id="cmdGo">Kaydet</button></div>
-    <p class="muted small">${SR ? 'Mikrofona bas ve söyle. ' : ''}Ücret söylemezsen ${tl(SHOP.fee)} yazılır.</p>
-    ${m.ok ? `<div class="note" style="background:var(--ok-soft);color:var(--ok);font-weight:600">✓ ${esc(m.ok)} ${m.undo ? '<button class="link" id="undo">Geri al</button>' : ''}</div>` : ''}${m.err ? `<p class="err">${esc(m.err)}</p>` : ''}
-  </section>
-  <section class="sec"><div class="sec-h"><h2>Randevular</h2><button class="btn ${P.adding ? 'ghost' : 'dark'} sm" id="addT">${P.adding ? 'Vazgeç' : '+ Kapıdan gelen'}</button></div>
+  <div class="kasa"><span>${isToday ? 'Bugünün kasası' : 'Günün kasası'}</span><b class="money">${tl(inc)}</b><small>${came.length} müşteri geldi${waiting.length ? ' · ' + waiting.length + ' bekliyor' : ''}</small></div>
+  ${SR ? `<button class="bigmic ${listening ? 'rec' : ''}" id="mic">${listening ? ICON.stop : ICON.mic}<span>${listening ? 'Dinliyorum… bitirmek için dokun' : 'Konuşarak kaydet'}</span></button>` : ''}
+  <div class="cmd"><input id="cmd" placeholder="${SR ? 'veya yaz: ' : ''}3'te Ahmet geldi 600" aria-label="Kayıt"><button class="btn dark" id="cmdGo">Kaydet</button></div>
+  ${m.ok ? `<div class="note okn">✓ ${esc(m.ok)} ${m.undo ? '<button class="link" id="undo">Geri al</button>' : ''}</div>` : ''}${m.err ? `<p class="err">${esc(m.err)}</p>` : ''}
+  <section class="sec"><div class="sec-h"><h2>Randevular</h2><button class="btn ${P.adding ? 'ghost' : 'dark'} sm" id="addT">${P.adding ? 'Vazgeç' : '+ Ekle'}</button></div>
   ${P.adding ? `<div class="card">
-    <div class="row"><label for="wN">Ad soyad<input id="wN" maxlength="80"></label><label for="wP">Telefon<input id="wP" type="tel" inputmode="tel" maxlength="20"></label></div>
-    <div class="row"><label for="wS">Hizmet<select id="wS">${sv.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')}</select></label>
-    <label for="wF">Ücret (₺)<input id="wF" type="number" inputmode="numeric" value="${SHOP.fee}"></label><label for="wT">Saat<input id="wT" type="time" value="${nowHM}"></label></div>
-    <button class="btn ok" id="wSave">Kaydet</button></div>` : ''}
-  <div class="card"><div class="list">${list.map(a => `<div class="item"><div class="t">${hm(a.time)}</div><div class="main">
-    <div><b>${esc(a.name)}</b> ${pill(a.status)}</div><div class="muted">${esc(a.service)}${a.phone ? ' · ' + esc(a.phone) : ''}</div>
-    <div class="acts">${P.edit === a.id ? `<input id="pe" type="number" inputmode="numeric" value="${a.price}" style="width:110px;padding:7px" aria-label="Ücret"><button class="btn ok sm" id="peS">Kaydet</button>` : `<button class="btn ghost sm money" data-pe="${a.id}">${tl(a.price)} ✎</button>`}
-    ${a.status !== 'geldi' ? `<button class="btn ok sm" data-st="geldi" data-id="${a.id}">Geldi</button>` : ''}${a.status === 'bekliyor' ? `<button class="btn ghost sm" data-st="gelmedi" data-id="${a.id}">Gelmedi</button><button class="btn ghost sm" data-st="iptal" data-id="${a.id}">İptal</button>${a.phone ? `<a class="btn ghost sm" target="_blank" rel="noopener" href="https://wa.me/${waNum(a.phone)}?text=${encodeURIComponent(remindText(a))}">Hatırlat</a>` : ''}` : `<button class="btn ghost sm" data-st="bekliyor" data-id="${a.id}">Geri al</button>`}</div>
-  </div></div>`).join('') || '<p class="empty">Bu gün için randevu yok.</p>'}</div></div></section>
-  <section class="sec"><div class="sec-h"><h2>Son 7 gün</h2><span class="muted">${week.reduce((s, x) => s + x.value, 0)} müşteri</span></div>
-    <div class="card">${barChart(week, { aria: 'Son 7 günde gelen müşteri sayısı' })}</div></section>`;
+    <label for="wN">Ad soyad<input id="wN" maxlength="80"></label>
+    <div class="row"><label for="wS">Hizmet<select id="wS">${sv.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')}</select></label><label for="wT">Saat<input id="wT" type="time" value="${nowHM}"></label></div>
+    <div class="row"><label for="wF">Ücret (₺)<input id="wF" type="number" inputmode="numeric" value="${SHOP.fee}"></label><label for="wP">Telefon (isteğe bağlı)<input id="wP" type="tel" inputmode="tel" maxlength="20"></label></div>
+    <button class="btn ok" id="wSave">Geldi olarak kaydet</button></div>` : ''}
+  <div class="card appts">${list.map(row).join('') || '<p class="empty">Bu gün için randevu yok.</p>'}</div>
+  <p class="muted small">Daha fazla seçenek için isme dokun.</p></section>`;
   const $ = id => document.getElementById(id);
-  $('pv').onclick = () => { P.date = ymd(addDays(parseD(P.date), -1)); refresh(); };
-  $('nx').onclick = () => { P.date = ymd(addDays(parseD(P.date), 1)); refresh(); };
-  $('addT').onclick = () => { P.adding = !P.adding; render(); };
+  $('pv').onclick = () => { P.date = ymd(addDays(parseD(P.date), -1)); P.edit = null; refresh(); };
+  $('nx').onclick = () => { P.date = ymd(addDays(parseD(P.date), 1)); P.edit = null; refresh(); };
+  $('addT').onclick = () => { P.adding = !P.adding; render(); if (P.adding) $('wN').focus(); };
   if (P.adding) $('wSave').onclick = async () => {
     const n = $('wN').value.trim(), p = $('wP').value.trim(), s = sv.find(x => x.id === $('wS').value), t = $('wT').value;
     if (n.length < 2 || !t) { toast('İsim ve saat gir.'); return; }
     if (await mutate(() => SB.from('appointments').insert({ shop_id: SHOP.id, date: P.date, time: t, dur: s.dur, service: s.name, price: Math.max(0, Number($('wF').value) || SHOP.fee), name: n, phone: p, status: 'geldi', source: 'panel' }), 'Kaydedildi')) { P.adding = false; render(); }
   };
-  app.querySelectorAll('[data-st]').forEach(b => b.onclick = () => mutate(() => SB.from('appointments').update({ status: b.dataset.st }).eq('id', b.dataset.id)));
-  app.querySelectorAll('[data-pe]').forEach(b => b.onclick = () => { P.edit = b.dataset.pe; render(); const i = $('pe'); i.focus(); i.select(); });
+  app.querySelectorAll('[data-open]').forEach(b => b.onclick = () => { P.edit = P.edit === b.dataset.open ? null : b.dataset.open; render(); });
+  app.querySelectorAll('[data-st]').forEach(b => b.onclick = () => { P.edit = null; mutate(() => SB.from('appointments').update({ status: b.dataset.st }).eq('id', b.dataset.id)); });
   if ($('peS')) { const done = async () => { const id = P.edit, v = Math.max(0, Number($('pe').value) || 0); P.edit = null; await mutate(() => SB.from('appointments').update({ price: v }).eq('id', id), 'Ücret kaydedildi'); }; $('peS').onclick = done; $('pe').onkeydown = e => { if (e.key === 'Enter') done(); }; }
   bindCmd();
 }
@@ -194,7 +190,6 @@ function tabMoney() {
   const inMonth = r => r.date.startsWith(P.month);
   const ap = DATA.six.filter(inMonth), ex = DATA.sixExp.filter(inMonth);
   const inc = ap.reduce((s, a) => s + a.price, 0), exp = ex.reduce((s, e) => s + Number(e.amount), 0), net = inc - exp;
-  const bySvc = {}; ap.forEach(a => { bySvc[a.service] = (bySvc[a.service] || 0) + a.price; });
   const six = [];
   for (let i = 5; i >= 0; i--) {
     const d = new Date(y, mo - 1 - i, 1), key = d.getFullYear() + '-' + pad(d.getMonth() + 1);
@@ -202,23 +197,22 @@ function tabMoney() {
   }
   const shift = n => { const d = new Date(y, mo - 1 + n, 1); P.month = d.getFullYear() + '-' + pad(d.getMonth() + 1); refresh(); };
   app.innerHTML = `<header class="head"><h1>Kasa</h1>
-    <div class="sec-h" style="margin-top:6px"><button class="btn ghost sm" id="pm" aria-label="Önceki ay">‹</button><b>${MONTHS[mo - 1]} ${y}</b><button class="btn ghost sm" id="nm" aria-label="Sonraki ay">›</button></div></header>
-  <div class="stats"><div class="stat hero"><b class="money">${tl(net)}</b><span>Net kâr</span></div>
-    <div class="stat"><b class="money pos">${tlShort(inc)}</b><span>Gelir</span></div><div class="stat"><b class="money neg">${tlShort(exp)}</b><span>Gider</span></div><div class="stat"><b>${ap.length}</b><span>Müşteri</span></div></div>
+    <div class="daynav"><button class="btn ghost sm" id="pm" aria-label="Önceki ay">‹</button><b>${MONTHS[mo - 1]} ${y}</b><button class="btn ghost sm" id="nm" aria-label="Sonraki ay">›</button></div></header>
+  <div class="kasa"><span>Bu ay net kâr</span><b class="money">${tl(net)}</b><small>Gelir ${tl(inc)} · Gider ${tl(exp)} · ${ap.length} müşteri</small></div>
   <section class="sec"><h2>Son 6 ay</h2><div class="card">${barChart(six, { aria: 'Son 6 ay gelir ve gider', short: tlShort, fmt: tl })}
     <div class="legend"><span><i style="background:var(--blue)"></i>Gelir</span><span><i style="background:var(--muted);opacity:.35"></i>Gider</span></div></div></section>
-  ${inc ? `<section class="sec"><h2>Gelir hangi hizmetten</h2><div class="card"><div class="list">${Object.entries(bySvc).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<div class="item"><div class="main"><div class="sec-h"><span>${esc(k)}</span><b class="money">${tl(v)}</b></div><div class="hbar"><i style="width:${Math.round(v / inc * 100)}%"></i></div></div></div>`).join('')}</div></div></section>` : ''}
-  <section class="sec"><h2>Gider ekle</h2>
-    <div class="row"><label for="eD">Ne için<input id="eD" maxlength="120" placeholder="Kira, malzeme, fatura"></label><label for="eA">Tutar (₺)<input id="eA" type="number" inputmode="decimal" min="0"></label></div>
+  <section class="sec"><div class="sec-h"><h2>Giderler</h2><button class="btn ${P.adding ? 'ghost' : 'dark'} sm" id="eT0">${P.adding ? 'Vazgeç' : '+ Gider ekle'}</button></div>
+  ${P.adding ? `<div class="card"><div class="row"><label for="eD">Ne için<input id="eD" maxlength="120" placeholder="Kira, malzeme, fatura"></label><label for="eA">Tutar (₺)<input id="eA" type="number" inputmode="decimal" min="0"></label></div>
     <label for="eT">Tarih<input id="eT" type="date" value="${P.month === ymd(new Date()).slice(0, 7) ? ymd(new Date()) : P.month + '-01'}"></label>
-    <button class="btn dark" id="eAdd">Gideri kaydet</button></section>
-  <section class="sec"><h2>${MONTHS[mo - 1]} giderleri</h2><div class="card"><div class="list">${ex.map(e => `<div class="item"><div class="main"><div>${esc(e.descr)}</div><div class="muted">${esc(fmtDs(e.date))}</div></div><b class="money">${tl(e.amount)}</b><button class="btn ghost sm" data-del="${e.id}">Sil</button></div>`).join('') || '<p class="empty">Bu ay gider girilmemiş.</p>'}</div></div></section>`;
+    <button class="btn dark" id="eAdd">Kaydet</button></div>` : ''}
+  <div class="card"><div class="list">${ex.map(e => `<div class="item"><div class="main"><div>${esc(e.descr)}</div><div class="muted small">${esc(fmtDs(e.date))}</div></div><b class="money">${tl(e.amount)}</b><button class="btn ghost sm" data-del="${e.id}" aria-label="Sil">Sil</button></div>`).join('') || '<p class="empty">Bu ay gider girilmemiş.</p>'}</div></div></section>`;
   const $ = id => document.getElementById(id);
   $('pm').onclick = () => shift(-1); $('nm').onclick = () => shift(1);
-  $('eAdd').onclick = () => {
+  $('eT0').onclick = () => { P.adding = !P.adding; render(); if (P.adding) $('eD').focus(); };
+  if ($('eAdd')) $('eAdd').onclick = async () => {
     const d = $('eD').value.trim(), a = Number($('eA').value), t = $('eT').value;
-    if (!d || !(a > 0) || !t) { toast('Açıklama, tutar ve tarih gir.'); return; }
-    mutate(() => SB.from('expenses').insert({ shop_id: SHOP.id, date: t, descr: d, amount: a }), 'Gider kaydedildi');
+    if (!d || !(a > 0) || !t) { toast('Ne için olduğunu, tutarı ve tarihi gir.'); return; }
+    if (await mutate(() => SB.from('expenses').insert({ shop_id: SHOP.id, date: t, descr: d, amount: a }), 'Gider kaydedildi')) { P.adding = false; render(); }
   };
   app.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = 'Emin misin?'; return; } mutate(() => SB.from('expenses').delete().eq('id', b.dataset.del), 'Silindi'); });
 }
@@ -231,34 +225,37 @@ function tabSettings() {
   const st = SHOP, link = shopLink(st.slug);
   if (!svcDraft) svcDraft = st.services.map(s => ({ ...s }));
   const msg = () => document.getElementById('sM').value.replace(/\{isim\}/g, st.name).replace(/\{link\}/g, link);
-  const d = daysUntil(st.paid_until);
+  const d = daysUntil(st.paid_until), free = String(st.paid_until) >= '2099';
   app.innerHTML = `<header class="head"><h1>Ayarlar</h1></header>
   ${SHOPS.length > 1 ? shopSwitch() : ''}
-  <section class="sec"><h2>Müşteri linkin</h2><div class="note">${esc(link)}</div><button class="btn dark" id="cpL">Linki kopyala</button></section>
-  <section class="sec"><h2>WhatsApp mesajı</h2><p class="muted small">WhatsApp Business → İşletme araçları → Uzakta mesajı bölümüne yapıştır.</p>
-    <label for="sM">Mesaj<textarea id="sM">${esc(st.msg)}</textarea></label>
-    <div class="note" id="prev" style="white-space:pre-wrap"></div><button class="btn ghost" id="cp">Mesajı kopyala</button></section>
-  <section class="sec"><h2>Dükkan</h2>
+  <section class="sec"><h2>Randevu linkin</h2><p class="muted small">Müşterilerine bu linki gönder; boş saatleri görüp randevu alırlar.</p>
+    <div class="note">${esc(link)}</div>
+    <div class="row"><button class="btn dark" id="cpL">Linki kopyala</button><a class="btn ok" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent('Randevu almak için: ' + link)}">WhatsApp'ta paylaş</a></div></section>
+  <details class="fold"><summary>Dükkan bilgileri</summary><div class="fold-in">
     <label for="sN">Dükkan adı<input id="sN" maxlength="60" value="${esc(st.name)}"></label>
-    <div class="row"><label for="sPh">Telefon<input id="sPh" type="tel" maxlength="25" value="${esc(st.phone)}"></label><label for="sF">Varsayılan ücret (₺)<input id="sF" type="number" inputmode="numeric" value="${st.fee}"></label></div>
+    <label for="sPh">Telefon<input id="sPh" type="tel" maxlength="25" value="${esc(st.phone)}"></label>
     <label for="sA">Adres<input id="sA" maxlength="160" value="${esc(st.address)}"></label>
-    <p class="muted small">Ücreti müşteriler görmez, sadece kasa hesabında kullanılır.</p></section>
-  <section class="sec"><h2>Çalışma saatleri</h2>
-    <div class="row"><label for="sO">Açılış<input id="sO" type="time" value="${hm(st.open_time)}"></label><label for="sC">Kapanış<input id="sC" type="time" value="${hm(st.close_time)}"></label>
-    <label for="sS">Randevu aralığı<select id="sS">${[15, 20, 30, 45, 60].map(v => `<option value="${v}" ${st.step == v ? 'selected' : ''}>${v} dakika</option>`).join('')}</select></label></div>
-    <div><p class="muted small" style="margin-bottom:6px">Kapalı günler</p><div class="check-row">${[1, 2, 3, 4, 5, 6, 0].map(i => `<label for="cd${i}"><input type="checkbox" id="cd${i}" data-cd="${i}" ${st.closed_days.includes(i) ? 'checked' : ''}>${DSH[i]}</label>`).join('')}</div></div></section>
-  <section class="sec"><h2>Hizmetler</h2><div class="card"><div class="list">${svcDraft.map((s, i) => `<div class="item"><div class="main"><div class="row"><input id="vn${i}" maxlength="40" value="${esc(s.name)}" aria-label="Hizmet adı" style="flex:2 1 140px"><select id="vd${i}" aria-label="Süre" style="flex:1 1 90px">${[10, 15, 20, 30, 40, 45, 60, 75, 90, 120].map(v => `<option value="${v}" ${s.dur == v ? 'selected' : ''}>${v} dk</option>`).join('')}</select></div></div>${svcDraft.length > 1 ? `<button class="btn ghost sm" data-rm="${i}" aria-label="Sil">Sil</button>` : ''}</div>`).join('')}</div>
-    <button class="btn ghost sm" id="addSvc">+ Hizmet ekle</button></div></section>
-  <button class="btn" id="sv">Ayarları kaydet</button>
-  <section class="sec"><h2>Abonelik</h2><p class="muted">${String(st.paid_until) >= '2099' ? 'Süresiz.' : d >= 0 ? `${esc(fmtDs(st.paid_until))} tarihine kadar geçerli (${d} gün kaldı).` : 'Süresi doldu.'}</p></section>
+    <label for="sF">Varsayılan ücret (₺)<input id="sF" type="number" inputmode="numeric" value="${st.fee}"></label>
+    <p class="muted small">Ücreti müşteriler görmez; kayıtlarda otomatik yazılır, sonra değiştirebilirsin.</p></div></details>
+  <details class="fold"><summary>Çalışma saatleri</summary><div class="fold-in">
+    <div class="row"><label for="sO">Açılış<input id="sO" type="time" value="${hm(st.open_time)}"></label><label for="sC">Kapanış<input id="sC" type="time" value="${hm(st.close_time)}"></label></div>
+    <label for="sS">Randevu aralığı<select id="sS">${[15, 20, 30, 45, 60].map(v => `<option value="${v}" ${st.step == v ? 'selected' : ''}>${v} dakikada bir</option>`).join('')}</select></label>
+    <p class="muted small">Kapalı günler</p><div class="check-row">${[1, 2, 3, 4, 5, 6, 0].map(i => `<label for="cd${i}"><input type="checkbox" id="cd${i}" data-cd="${i}" ${st.closed_days.includes(i) ? 'checked' : ''}>${DSH[i]}</label>`).join('')}</div></div></details>
+  <details class="fold" ${P.svcOpen ? 'open' : ''}><summary>Hizmetler</summary><div class="fold-in"><div class="list">${svcDraft.map((s, i) => `<div class="item"><div class="main"><div class="row"><input id="vn${i}" maxlength="40" value="${esc(s.name)}" aria-label="Hizmet adı" style="flex:2 1 140px"><select id="vd${i}" aria-label="Süre" style="flex:1 1 90px">${[10, 15, 20, 30, 40, 45, 60, 75, 90, 120].map(v => `<option value="${v}" ${s.dur == v ? 'selected' : ''}>${v} dk</option>`).join('')}</select></div></div>${svcDraft.length > 1 ? `<button class="btn ghost sm" data-rm="${i}" aria-label="Sil">Sil</button>` : ''}</div>`).join('')}</div>
+    <button class="btn ghost sm" id="addSvc">+ Hizmet ekle</button></div></details>
+  <details class="fold"><summary>WhatsApp otomatik mesajı</summary><div class="fold-in">
+    <label for="sM">Mesaj<textarea id="sM">${esc(st.msg)}</textarea></label>
+    <div class="note" id="prev" style="white-space:pre-wrap"></div><button class="btn ghost" id="cp">Mesajı kopyala</button></div></details>
+  <button class="btn" id="sv">Kaydet</button>
+  <p class="muted small" style="text-align:center">Abonelik: ${free ? 'süresiz' : d >= 0 ? esc(fmtDs(st.paid_until)) + ' tarihine kadar (' + d + ' gün)' : 'süresi doldu'}</p>
   ${IS_SUPER ? '<a class="btn ghost" href="/patron/">Patron paneli</a>' : ''}
   <button class="btn ghost" id="lo">Çıkış yap</button>`;
   const $ = id => document.getElementById(id);
   const prev = $('prev'); prev.textContent = msg(); $('sM').oninput = () => { prev.textContent = msg(); };
   const grab = () => svcDraft.forEach((s, i) => { s.name = $('vn' + i).value; s.dur = Number($('vd' + i).value); });
   $('cp').onclick = () => copyText(msg()); $('cpL').onclick = () => copyText(link); $('lo').onclick = logout; bindSwitch();
-  $('addSvc').onclick = () => { grab(); svcDraft.push({ id: 'h' + Date.now().toString(36), name: '', dur: 30 }); tabSettings(); $('vn' + (svcDraft.length - 1)).focus(); };
-  app.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { grab(); svcDraft.splice(Number(b.dataset.rm), 1); tabSettings(); });
+  $('addSvc').onclick = () => { grab(); P.svcOpen = true; svcDraft.push({ id: 'h' + Date.now().toString(36), name: '', dur: 30 }); tabSettings(); $('vn' + (svcDraft.length - 1)).focus(); };
+  app.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { grab(); P.svcOpen = true; svcDraft.splice(Number(b.dataset.rm), 1); tabSettings(); });
   $('sv').onclick = async () => {
     grab();
     const services = svcDraft.filter(s => s.name.trim()).map(s => ({ id: s.id, name: s.name.trim().slice(0, 40), dur: s.dur }));
@@ -273,7 +270,7 @@ function tabSettings() {
     try {
       const r = await q(() => SB.from('shops').update(upd).eq('id', st.id).select('*'), 2);
       if (!r || !r.length) throw new Error('yok');
-      SHOP = r[0]; SHOPS = SHOPS.map(s => s.id === SHOP.id ? SHOP : s); svcDraft = null; toast('Ayarlar kaydedildi'); render();
+      SHOP = r[0]; SHOPS = SHOPS.map(s => s.id === SHOP.id ? SHOP : s); svcDraft = null; P.svcOpen = false; toast('Kaydedildi'); render();
     } catch (e) { toast('Kaydedilemedi, tekrar dene.'); }
   };
 }
