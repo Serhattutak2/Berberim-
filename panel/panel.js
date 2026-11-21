@@ -1,39 +1,54 @@
-/* Berberim · berber paneli */
+/* Berberim · berber paneli
+   Hız için: her ekran önce telefondaki son kopyadan anında çizilir, internetten gelen yeni veri arkadan güncellenir.
+   Dokunuşlar (Geldi, ücret, gider…) ekranda hemen işlenir, kayıt arkada yapılır; hata olursa geri alınır. */
 let SHOP = null, SHOPS = [], IS_SUPER = false;
-const P = { tab: 'gun', date: ymd(new Date()), month: ymd(new Date()).slice(0, 7), q: '', adding: false, edit: null, cmdMsg: null };
-const DATA = { day: [], week: [], all: null, six: [], sixExp: [] };
+const P = { tab: 'gun', date: ymd(new Date()), month: ymd(new Date()).slice(0, 7), q: '', adding: false, edit: null, cmdMsg: null, svcOpen: false };
+const DATA = { day: null, cust: null, money: null };
 const app = document.getElementById('app'), tabbar = document.getElementById('tabbar');
 const pill = s => ({ bekliyor: '<span class="pill p-wait">Bekliyor</span>', geldi: '<span class="pill p-ok">Geldi</span>', gelmedi: '<span class="pill p-no">Gelmedi</span>', iptal: '<span class="pill p-warn">İptal</span>' }[s]);
 const isOpen = s => s.active && daysUntil(s.paid_until) >= 0;
+const ck = (...k) => 'bc:' + SHOP.id + ':' + k.join(':');
+const busy = () => { const a = document.activeElement; return listening || P.adding || P.edit !== null || (a && /INPUT|TEXTAREA|SELECT/.test(a.tagName) && app.contains(a)); };
+const sortDay = () => DATA.day && DATA.day.sort((a, b) => String(a.time).localeCompare(String(b.time)));
 
-/* ---------- Giriş ---------- */
+/* ---------- Açılış ---------- */
 async function boot() {
+  const { data } = await SB.auth.getSession();
+  if (!data.session) return renderLogin();
+  // Önce son bilinen dükkanla hemen aç
+  const cached = store.get('bc:shops');
+  if (cached && cached.shops && cached.shops.length) { applyShops(cached.shops, cached.sup); if (SHOP && isOpen(SHOP)) show('gun'); }
   try {
-    const { data } = await SB.auth.getSession();
-    if (!data.session) return renderLogin();
     const [shops, sup] = await Promise.all([q(() => SB.from('shops').select('*').order('name')), q(() => SB.rpc('is_super')).catch(() => false)]);
-    SHOPS = shops || []; IS_SUPER = !!sup;
-    if (!SHOPS.length) {
-      tabbar.hidden = true;
-      app.innerHTML = `<header class="head"><h1>Dükkan bulunamadı</h1><p>Bu hesaba bağlı bir dükkan yok.</p></header>
-        ${IS_SUPER ? '<a class="btn" href="/patron/">Patron paneline git</a>' : ''}<button class="btn ghost" id="lo">Çıkış yap</button>`;
-      document.getElementById('lo').onclick = logout; return;
-    }
-    const remembered = store.get('berberim_shop');
-    SHOP = SHOPS.find(s => s.id === remembered) || SHOPS[0];
+    store.set('bc:shops', { shops, sup: !!sup });
+    const wasShown = !!(cached && SHOP);
+    applyShops(shops || [], !!sup);
+    if (!SHOPS.length) return renderNoShop();
     if (!isOpen(SHOP)) return renderLocked();
-    await refresh();
-    setInterval(() => { if (!document.hidden && !P.adding && P.edit === null && P.tab === 'gun') refresh(true); }, 60000);
+    if (!wasShown) show('gun'); else if (P.tab === 'ayar' && !busy()) render();
   } catch (e) {
-    tabbar.hidden = true;
-    app.innerHTML = `<header class="head"><h1>Bağlantı kurulamadı</h1><p>İnternetinizi kontrol edip tekrar deneyin.</p></header><button class="btn dark" onclick="location.reload()">Tekrar dene</button><p class="foot">${esc((e && (e.message || e.code)) || '')}</p>`;
+    if (!SHOP) { tabbar.hidden = true; app.innerHTML = `<header class="head"><h1>Bağlantı kurulamadı</h1><p>İnternetini kontrol edip tekrar dene.</p></header><button class="btn dark" onclick="location.reload()">Tekrar dene</button>`; }
+    else toast('İnternet yok gibi; son kayıtlı bilgiler gösteriliyor.');
   }
+  setInterval(() => { if (!document.hidden && !busy()) load(true); }, 45000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && SHOP && !busy()) load(true); });
 }
-async function logout() { await SB.auth.signOut(); location.reload(); }
+function applyShops(shops, sup) {
+  SHOPS = shops; IS_SUPER = sup;
+  const remembered = store.get('berberim_shop');
+  SHOP = SHOPS.find(s => s.id === remembered) || SHOPS[0] || null;
+}
+async function logout() { try { localStorage.clear(); } catch (e) {} await SB.auth.signOut(); location.reload(); }
+function renderNoShop() {
+  tabbar.hidden = true;
+  app.innerHTML = `<header class="head"><h1>Dükkan bulunamadı</h1><p>Bu hesaba bağlı bir dükkan yok.</p></header>
+    ${IS_SUPER ? '<a class="btn" href="/patron/">Patron paneline git</a>' : ''}<button class="btn ghost" id="lo">Çıkış yap</button>`;
+  document.getElementById('lo').onclick = logout;
+}
 
 function renderLogin(msg) {
   tabbar.hidden = true;
-  app.innerHTML = `<header class="head"><h1>Berber girişi</h1><p>Hesap bilgilerini sana Berberim verdi.</p><div class="pole" aria-hidden="true"></div></header>
+  app.innerHTML = `<header class="head"><h1>Berber girişi</h1><p>Kullanıcı adını ve şifreni Berberim verdi.</p><div class="pole" aria-hidden="true"></div></header>
   <section class="sec">
     <label for="em">Kullanıcı adı<input id="em" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
     <label for="pw">Şifre<input id="pw" type="password" autocomplete="current-password"></label>
@@ -46,7 +61,7 @@ function renderLogin(msg) {
     if (!login || !password) return renderLogin('Kullanıcı adını ve şifreni yaz.');
     const b = document.getElementById('go'); b.disabled = true; b.textContent = 'Giriş yapılıyor…';
     const { error } = await SB.auth.signInWithPassword({ email, password });
-    if (error) return renderLogin(/invalid/i.test(error.message) ? 'Kullanıcı adı veya şifre yanlış.' : 'Giriş yapılamadı: ' + error.message);
+    if (error) return renderLogin(/invalid/i.test(error.message) ? 'Kullanıcı adı veya şifre yanlış.' : 'Giriş yapılamadı, internetini kontrol et.');
     boot();
   };
   document.getElementById('go').onclick = go;
@@ -67,31 +82,60 @@ async function renderLocked() {
   document.getElementById('lo').onclick = logout; bindSwitch();
 }
 
-/* ---------- Veri ---------- */
-async function refresh(silent) {
+/* ---------- Veri: önce kopya, sonra internet ---------- */
+function keyFor(tab) { return tab === 'gun' ? ck('day', P.date) : tab === 'musteri' ? ck('cust') : tab === 'kasa' ? ck('money', P.month) : null; }
+function show(tab) {
+  P.tab = tab; const k = keyFor(tab);
+  if (tab === 'gun') DATA.day = k ? store.get(k) : null;
+  if (tab === 'musteri') DATA.cust = store.get(k);
+  if (tab === 'kasa') DATA.money = store.get(k);
+  render();
+  if (tab !== 'ayar') load();
+}
+let loadSeq = 0;
+async function load(silent) {
+  const tab = P.tab, key = keyFor(tab), seq = ++loadSeq, sid = SHOP.id;
+  if (!key) return;
   try {
-    const sid = SHOP.id;
-    if (P.tab === 'gun') {
-      DATA.day = await q(() => SB.from('appointments').select('*').eq('shop_id', sid).eq('date', P.date).order('time'));
-    } else if (P.tab === 'musteri') {
-      DATA.all = await q(() => SB.from('appointments').select('name,phone,status,price,date').eq('shop_id', sid).order('date', { ascending: false }).limit(20000));
-    } else if (P.tab === 'kasa') {
-      const [y, m] = P.month.split('-').map(Number), start = ymd(new Date(y, m - 6, 1)), end = ymd(new Date(y, m, 0));
-      const [ap, ex] = await Promise.all([
-        q(() => SB.from('appointments').select('date,service,price').eq('shop_id', sid).eq('status', 'geldi').gte('date', start).lte('date', end).limit(20000)),
-        q(() => SB.from('expenses').select('*').eq('shop_id', sid).gte('date', start).lte('date', end).order('date', { ascending: false }))
-      ]);
-      DATA.six = ap; DATA.sixExp = ex;
-    }
-    render();
+    let d;
+    if (tab === 'gun') d = await q(() => SB.from('appointments').select('id,date,time,dur,service,name,phone,price,status').eq('shop_id', sid).eq('date', P.date).order('time'));
+    else if (tab === 'musteri') d = await q(() => SB.rpc('shop_customers', { p_shop: sid }));
+    else d = await q(() => SB.rpc('shop_money', { p_shop: sid, p_month: P.month + '-01' }));
+    store.set(key, d);
+    if (seq !== loadSeq || P.tab !== tab || keyFor(tab) !== key) return;
+    const cur = tab === 'gun' ? DATA.day : tab === 'musteri' ? DATA.cust : DATA.money;
+    if (JSON.stringify(cur) === JSON.stringify(d)) return;
+    if (tab === 'gun') DATA.day = d; else if (tab === 'musteri') DATA.cust = d; else DATA.money = d;
+    if (!(silent && busy())) render();
   } catch (e) {
-    if (e && /JWT|auth/i.test(e.message || '')) return renderLogin('Oturum süresi doldu, tekrar giriş yap.');
-    if (!silent) toast('Veriler yüklenemedi, tekrar dene.');
+    if (e && /JWT|jwt|auth/i.test(e.message || '')) return renderLogin('Oturum süresi doldu, tekrar giriş yap.');
+    if (e && /YETKI/.test(e.message || '')) return location.reload();
+    if (!silent) toast('İnternet yavaş; son kayıtlı bilgiler gösteriliyor.');
   }
 }
-async function mutate(fn, okMsg) {
-  try { await q(fn, 2); if (okMsg) toast(okMsg); await refresh(true); return true; }
-  catch (e) { toast('Kaydedilemedi, tekrar dene.'); return false; }
+/* Arkada kaydet; hata olursa geri al */
+async function save(fn, undo, okMsg) {
+  try { await q(fn, 2); if (okMsg) toast(okMsg); }
+  catch (e) { undo && undo(); render(); toast('Kaydedilemedi, tekrar dene.'); }
+}
+const keepDay = () => store.set(ck('day', P.date), DATA.day);
+function setStatus(id, st) {
+  const a = (DATA.day || []).find(x => x.id === id); if (!a) return;
+  const prev = a.status; a.status = st; P.edit = null; keepDay(); render();
+  save(() => SB.from('appointments').update({ status: st }).eq('id', id), () => { a.status = prev; keepDay(); });
+}
+function setPrice(id, v) {
+  const a = (DATA.day || []).find(x => x.id === id); if (!a) return;
+  const prev = a.price; a.price = v; P.edit = null; keepDay(); render();
+  save(() => SB.from('appointments').update({ price: v }).eq('id', id), () => { a.price = prev; keepDay(); }, 'Ücret kaydedildi');
+}
+async function addAppt(row) {
+  const tmp = { ...row, id: 'tmp' + Date.now() };
+  if (row.date === P.date) { DATA.day = [...(DATA.day || []), tmp]; sortDay(); keepDay(); render(); }
+  try {
+    const r = await q(() => SB.from('appointments').insert({ ...row, shop_id: SHOP.id }).select('id'), 2);
+    tmp.id = r[0].id; keepDay(); return tmp.id;
+  } catch (e) { DATA.day = (DATA.day || []).filter(x => x !== tmp); keepDay(); render(); toast('Kaydedilemedi, tekrar dene.'); return null; }
 }
 
 /* ---------- İskelet ---------- */
@@ -101,20 +145,21 @@ function render() {
   tabbar.innerHTML = `<div class="tabbar-in">${tabs.map(([k, v, i]) => `<button class="${P.tab === k ? 'on' : ''}" data-tab="${k}" aria-label="${v}">${i}<span>${v}</span></button>`).join('')}</div>`;
   tabbar.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => {
     if (P.tab === b.dataset.tab) return;
-    P.tab = b.dataset.tab; P.edit = null; P.adding = false; window.scrollTo(0, 0);
-    if (P.tab === 'ayar') render(); else { app.innerHTML = '<p class="loading">Yükleniyor…</p>'; refresh(); }
+    P.edit = null; P.adding = false; window.scrollTo(0, 0); show(b.dataset.tab);
   });
   ({ gun: tabDay, musteri: tabCust, kasa: tabMoney, ayar: tabSettings })[P.tab]();
 }
 function subBanner() {
+  if (String(SHOP.paid_until) >= '2099') return '';
   const d = daysUntil(SHOP.paid_until);
   return d <= 30 ? `<div class="banner ${d <= 7 ? 'bad' : ''}">Aboneliğin ${d === 0 ? 'bugün' : d + ' gün sonra'} bitiyor (${esc(fmtDs(SHOP.paid_until))}). Yenilemek için Berberim'e yaz.</div>` : '';
 }
+const skeleton = n => `<div class="card appts">${Array.from({ length: n }, () => '<div class="skel"></div>').join('')}</div>`;
 
 /* ---------- Bugün ---------- */
 const remindText = a => `Merhaba ${a.name.split(' ')[0]}, ${SHOP.name} randevunuzu hatırlatırız: ${fmtD(a.date)}, saat ${hm(a.time)} (${a.service}). Görüşmek üzere ✂️`;
 function tabDay() {
-  const list = DATA.day, came = list.filter(a => a.status === 'geldi'), inc = came.reduce((s, a) => s + a.price, 0);
+  const list = DATA.day || [], came = list.filter(a => a.status === 'geldi'), inc = came.reduce((s, a) => s + Number(a.price), 0);
   const waiting = list.filter(a => a.status === 'bekliyor'), sv = SHOP.services, isToday = P.date === ymd(new Date());
   const nowHM = toHM(Math.round((new Date().getHours() * 60 + new Date().getMinutes()) / 15) * 15 % 1440);
   const m = P.cmdMsg || {};
@@ -133,9 +178,9 @@ function tabDay() {
   app.innerHTML = `<header class="head"><h1>${esc(SHOP.name)}</h1>
     <div class="daynav"><button class="btn ghost sm" id="pv" aria-label="Önceki gün">‹</button><b>${isToday ? 'Bugün' : esc(fmtD(P.date))}</b><button class="btn ghost sm" id="nx" aria-label="Sonraki gün">›</button></div></header>
   ${subBanner()}
-  <div class="kasa"><span>${isToday ? 'Bugünün kasası' : 'Günün kasası'}</span><b class="money">${tl(inc)}</b><small>${came.length} müşteri geldi${waiting.length ? ' · ' + waiting.length + ' bekliyor' : ''}</small></div>
+  <div class="kasa"><span>${isToday ? 'Bugünün kasası' : 'Günün kasası'}</span><b class="money">${DATA.day ? tl(inc) : '…'}</b><small>${came.length} müşteri geldi${waiting.length ? ' · ' + waiting.length + ' bekliyor' : ''}</small></div>
   ${SR ? `<button class="bigmic ${listening ? 'rec' : ''}" id="mic">${listening ? ICON.stop : ICON.mic}<span>${listening ? 'Dinliyorum… bitirmek için dokun' : 'Konuşarak kaydet'}</span></button>` : ''}
-  <div class="cmd"><input id="cmd" placeholder="${SR ? 'veya yaz: ' : ''}3'te Ahmet geldi 600" aria-label="Kayıt"><button class="btn dark" id="cmdGo">Kaydet</button></div>
+  <div class="cmd"><input id="cmd" placeholder="${SR ? 'veya yaz: ' : ''}3'te Ahmet geldi 600" aria-label="Kayıt" enterkeyhint="done"><button class="btn dark" id="cmdGo">Kaydet</button></div>
   ${m.ok ? `<div class="note okn">✓ ${esc(m.ok)} ${m.undo ? '<button class="link" id="undo">Geri al</button>' : ''}</div>` : ''}${m.err ? `<p class="err">${esc(m.err)}</p>` : ''}
   <section class="sec"><div class="sec-h"><h2>Randevular</h2><button class="btn ${P.adding ? 'ghost' : 'dark'} sm" id="addT">${P.adding ? 'Vazgeç' : '+ Ekle'}</button></div>
   ${P.adding ? `<div class="card">
@@ -143,78 +188,84 @@ function tabDay() {
     <div class="row"><label for="wS">Hizmet<select id="wS">${sv.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')}</select></label><label for="wT">Saat<input id="wT" type="time" value="${nowHM}"></label></div>
     <div class="row"><label for="wF">Ücret (₺)<input id="wF" type="number" inputmode="numeric" value="${SHOP.fee}"></label><label for="wP">Telefon (isteğe bağlı)<input id="wP" type="tel" inputmode="tel" maxlength="20"></label></div>
     <button class="btn ok" id="wSave">Geldi olarak kaydet</button></div>` : ''}
-  <div class="card appts">${list.map(row).join('') || '<p class="empty">Bu gün için randevu yok.</p>'}</div>
-  <p class="muted small">Daha fazla seçenek için isme dokun.</p></section>`;
+  ${DATA.day ? `<div class="card appts">${list.map(row).join('') || '<p class="empty">Bu gün için randevu yok.</p>'}</div>
+  ${list.length ? '<p class="muted small">Daha fazla seçenek için isme dokun.</p>' : ''}` : skeleton(4)}</section>`;
   const $ = id => document.getElementById(id);
-  $('pv').onclick = () => { P.date = ymd(addDays(parseD(P.date), -1)); P.edit = null; refresh(); };
-  $('nx').onclick = () => { P.date = ymd(addDays(parseD(P.date), 1)); P.edit = null; refresh(); };
+  const go = n => { P.date = ymd(addDays(parseD(P.date), n)); P.edit = null; show('gun'); };
+  $('pv').onclick = () => go(-1); $('nx').onclick = () => go(1);
   $('addT').onclick = () => { P.adding = !P.adding; render(); if (P.adding) $('wN').focus(); };
-  if (P.adding) $('wSave').onclick = async () => {
+  if (P.adding) $('wSave').onclick = () => {
     const n = $('wN').value.trim(), p = $('wP').value.trim(), s = sv.find(x => x.id === $('wS').value), t = $('wT').value;
     if (n.length < 2 || !t) { toast('İsim ve saat gir.'); return; }
-    if (await mutate(() => SB.from('appointments').insert({ shop_id: SHOP.id, date: P.date, time: t, dur: s.dur, service: s.name, price: Math.max(0, Number($('wF').value) || SHOP.fee), name: n, phone: p, status: 'geldi', source: 'panel' }), 'Kaydedildi')) { P.adding = false; render(); }
+    P.adding = false;
+    addAppt({ date: P.date, time: t + ':00', dur: s.dur, service: s.name, price: Math.max(0, Number($('wF').value) || SHOP.fee), name: n, phone: p, status: 'geldi', source: 'panel' });
+    toast('Kaydedildi');
   };
   app.querySelectorAll('[data-open]').forEach(b => b.onclick = () => { P.edit = P.edit === b.dataset.open ? null : b.dataset.open; render(); });
-  app.querySelectorAll('[data-st]').forEach(b => b.onclick = () => { P.edit = null; mutate(() => SB.from('appointments').update({ status: b.dataset.st }).eq('id', b.dataset.id)); });
-  if ($('peS')) { const done = async () => { const id = P.edit, v = Math.max(0, Number($('pe').value) || 0); P.edit = null; await mutate(() => SB.from('appointments').update({ price: v }).eq('id', id), 'Ücret kaydedildi'); }; $('peS').onclick = done; $('pe').onkeydown = e => { if (e.key === 'Enter') done(); }; }
+  app.querySelectorAll('[data-st]').forEach(b => b.onclick = () => setStatus(b.dataset.id, b.dataset.st));
+  if ($('peS')) { const done = () => setPrice(P.edit, Math.max(0, Number($('pe').value) || 0)); $('peS').onclick = done; $('pe').onkeydown = e => { if (e.key === 'Enter') done(); }; }
   bindCmd();
 }
 
 /* ---------- Müşteriler ---------- */
 function tabCust() {
-  const map = {}, today = new Date();
-  (DATA.all || []).forEach(a => {
-    const k = digits(a.phone) || a.name.toLocaleLowerCase('tr');
-    const c = map[k] || (map[k] = { name: a.name, phone: a.phone, visits: 0, no: 0, spent: 0, last: null });
-    if (a.status === 'geldi') { c.visits++; c.spent += a.price; if (!c.last || a.date > c.last) c.last = a.date; }
-    if (a.status === 'gelmedi') c.no++;
-  });
-  let arr = Object.values(map).sort((a, b) => b.visits - a.visits);
-  const total = arr.length, loyal = arr.filter(c => c.visits >= 5).length, ql = P.q.toLocaleLowerCase('tr');
-  if (ql) arr = arr.filter(c => c.name.toLocaleLowerCase('tr').includes(ql) || (c.phone || '').includes(ql));
-  app.innerHTML = `<header class="head"><h1>Müşteriler</h1><p>${total} müşteri · ${loyal} sadık müşteri</p></header>
+  const all = DATA.cust || [], today = new Date(), ql = P.q.toLocaleLowerCase('tr');
+  const loyal = all.filter(c => c.visits >= 5).length;
+  const arr = ql ? all.filter(c => String(c.name).toLocaleLowerCase('tr').includes(ql) || String(c.phone || '').includes(ql)) : all;
+  app.innerHTML = `<header class="head"><h1>Müşteriler</h1><p>${DATA.cust ? `${all.length} müşteri · ${loyal} sadık müşteri` : 'Yükleniyor…'}</p></header>
   <input id="q" placeholder="İsim veya telefon ara" value="${esc(P.q)}" aria-label="Müşteri ara" type="search">
-  <div class="card"><div class="list">${arr.slice(0, 300).map(c => {
-    const days = c.last ? Math.round((today - parseD(c.last)) / 864e5) : null;
-    return `<div class="item"><div class="main"><div><b>${esc(c.name)}</b> ${c.visits >= 5 ? '<span class="pill p-ok">Sadık</span>' : ''} ${days !== null && days >= 30 ? '<span class="pill p-warn">' + days + ' gündür yok</span>' : ''} ${c.no >= 2 ? '<span class="pill p-no">' + c.no + ' kez gelmedi</span>' : ''}</div>
-    <div class="muted">${c.visits} ziyaret${c.last ? ' · son ' + esc(fmtDs(c.last)) : ''}${c.phone ? ' · ' + esc(c.phone) : ''}</div>
-    ${c.phone && days !== null && days >= 30 ? `<div class="acts"><a class="btn ghost sm" target="_blank" rel="noopener" href="https://wa.me/${waNum(c.phone)}?text=${encodeURIComponent('Merhaba ' + c.name.split(' ')[0] + ', ' + SHOP.name + ' olarak sizi özledik! Randevu için: ' + shopLink(SHOP.slug))}">WhatsApp'tan davet et</a></div>` : ''}</div>
-    <div class="money"><b>${tl(c.spent)}</b></div></div>`;
-  }).join('') || '<p class="empty">Henüz müşteri yok. İlk randevu alındığında burada görünür.</p>'}</div></div>`;
-  const qi = document.getElementById('q'); qi.oninput = () => { P.q = qi.value; tabCust(); const n = document.getElementById('q'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); };
+  ${DATA.cust ? `<div class="card"><div class="list" id="clist">${custRows(arr.slice(0, 200), today)}</div></div>` : skeleton(6)}`;
+  const qi = document.getElementById('q');
+  qi.oninput = () => { P.q = qi.value; const ql2 = P.q.toLocaleLowerCase('tr'); const l = document.getElementById('clist'); if (l) l.innerHTML = custRows(all.filter(c => String(c.name).toLocaleLowerCase('tr').includes(ql2) || String(c.phone || '').includes(ql2)).slice(0, 200), today); };
+}
+function custRows(arr, today) {
+  return arr.map(c => {
+    const days = c.last_visit ? Math.round((today - parseD(c.last_visit)) / 864e5) : null;
+    return `<div class="item"><div class="main"><div><b>${esc(c.name)}</b> ${c.visits >= 5 ? '<span class="pill p-ok">Sadık</span>' : ''} ${days !== null && days >= 30 ? '<span class="pill p-warn">' + days + ' gündür yok</span>' : ''} ${c.no_show >= 2 ? '<span class="pill p-no">' + c.no_show + ' kez gelmedi</span>' : ''}</div>
+    <div class="muted small">${c.visits} ziyaret${c.last_visit ? ' · son ' + esc(fmtDs(c.last_visit)) : ''}${c.phone ? ' · ' + esc(c.phone) : ''}</div>
+    ${c.phone && days !== null && days >= 30 ? `<div class="acts"><a class="btn ghost sm" target="_blank" rel="noopener" href="https://wa.me/${waNum(c.phone)}?text=${encodeURIComponent('Merhaba ' + String(c.name).split(' ')[0] + ', ' + SHOP.name + ' olarak sizi özledik! Randevu için: ' + shopLink(SHOP.slug))}">WhatsApp'tan davet et</a></div>` : ''}</div>
+    <b class="money">${tl(c.spent)}</b></div>`;
+  }).join('') || '<p class="empty">Henüz müşteri yok. İlk randevu alındığında burada görünür.</p>';
 }
 
 /* ---------- Kasa ---------- */
 function tabMoney() {
-  const [y, mo] = P.month.split('-').map(Number);
-  const inMonth = r => r.date.startsWith(P.month);
-  const ap = DATA.six.filter(inMonth), ex = DATA.sixExp.filter(inMonth);
-  const inc = ap.reduce((s, a) => s + a.price, 0), exp = ex.reduce((s, e) => s + Number(e.amount), 0), net = inc - exp;
-  const six = [];
-  for (let i = 5; i >= 0; i--) {
-    const d = new Date(y, mo - 1 - i, 1), key = d.getFullYear() + '-' + pad(d.getMonth() + 1);
-    six.push({ label: MONTHS[d.getMonth()].slice(0, 3), value: DATA.six.filter(a => a.date.startsWith(key)).reduce((s, a) => s + a.price, 0), value2: DATA.sixExp.filter(e => e.date.startsWith(key)).reduce((s, e) => s + Number(e.amount), 0), hl: i === 0 });
-  }
-  const shift = n => { const d = new Date(y, mo - 1 + n, 1); P.month = d.getFullYear() + '-' + pad(d.getMonth() + 1); refresh(); };
+  const [y, mo] = P.month.split('-').map(Number), M = DATA.money;
+  const cur = M && M.months ? M.months[M.months.length - 1] : { inc: 0, exp: 0, n: 0 };
+  const ex = (M && M.expenses) || [];
+  const inc = Number(cur.inc), exp = Number(cur.exp), net = inc - exp;
+  const six = M && M.months ? M.months.map((r, i) => ({ label: MONTHS[Number(r.m.slice(5)) - 1].slice(0, 3), value: Number(r.inc), value2: Number(r.exp), hl: i === M.months.length - 1 })) : [];
+  const shift = n => { const d = new Date(y, mo - 1 + n, 1); P.month = d.getFullYear() + '-' + pad(d.getMonth() + 1); P.adding = false; show('kasa'); };
   app.innerHTML = `<header class="head"><h1>Kasa</h1>
     <div class="daynav"><button class="btn ghost sm" id="pm" aria-label="Önceki ay">‹</button><b>${MONTHS[mo - 1]} ${y}</b><button class="btn ghost sm" id="nm" aria-label="Sonraki ay">›</button></div></header>
-  <div class="kasa"><span>Bu ay net kâr</span><b class="money">${tl(net)}</b><small>Gelir ${tl(inc)} · Gider ${tl(exp)} · ${ap.length} müşteri</small></div>
-  <section class="sec"><h2>Son 6 ay</h2><div class="card">${barChart(six, { aria: 'Son 6 ay gelir ve gider', short: tlShort, fmt: tl })}
+  <div class="kasa"><span>Bu ay net kâr</span><b class="money">${M ? tl(net) : '…'}</b><small>Gelir ${tl(inc)} · Gider ${tl(exp)} · ${cur.n} müşteri</small></div>
+  <section class="sec"><h2>Son 6 ay</h2><div class="card">${M ? barChart(six, { aria: 'Son 6 ay gelir ve gider', short: tlShort, fmt: tl }) : '<div class="skel" style="height:150px"></div>'}
     <div class="legend"><span><i style="background:var(--blue)"></i>Gelir</span><span><i style="background:var(--muted);opacity:.35"></i>Gider</span></div></div></section>
   <section class="sec"><div class="sec-h"><h2>Giderler</h2><button class="btn ${P.adding ? 'ghost' : 'dark'} sm" id="eT0">${P.adding ? 'Vazgeç' : '+ Gider ekle'}</button></div>
   ${P.adding ? `<div class="card"><div class="row"><label for="eD">Ne için<input id="eD" maxlength="120" placeholder="Kira, malzeme, fatura"></label><label for="eA">Tutar (₺)<input id="eA" type="number" inputmode="decimal" min="0"></label></div>
     <label for="eT">Tarih<input id="eT" type="date" value="${P.month === ymd(new Date()).slice(0, 7) ? ymd(new Date()) : P.month + '-01'}"></label>
     <button class="btn dark" id="eAdd">Kaydet</button></div>` : ''}
-  <div class="card"><div class="list">${ex.map(e => `<div class="item"><div class="main"><div>${esc(e.descr)}</div><div class="muted small">${esc(fmtDs(e.date))}</div></div><b class="money">${tl(e.amount)}</b><button class="btn ghost sm" data-del="${e.id}" aria-label="Sil">Sil</button></div>`).join('') || '<p class="empty">Bu ay gider girilmemiş.</p>'}</div></div></section>`;
+  <div class="card"><div class="list">${ex.map(e => `<div class="item"><div class="main"><div>${esc(e.descr)}</div><div class="muted small">${esc(fmtDs(e.date))}</div></div><b class="money">${tl(e.amount)}</b><button class="btn ghost sm" data-del="${e.id}" aria-label="Sil">Sil</button></div>`).join('') || `<p class="empty">${M ? 'Bu ay gider girilmemiş.' : 'Yükleniyor…'}</p>`}</div></div></section>`;
   const $ = id => document.getElementById(id);
   $('pm').onclick = () => shift(-1); $('nm').onclick = () => shift(1);
   $('eT0').onclick = () => { P.adding = !P.adding; render(); if (P.adding) $('eD').focus(); };
+  const keep = () => store.set(ck('money', P.month), DATA.money);
   if ($('eAdd')) $('eAdd').onclick = async () => {
     const d = $('eD').value.trim(), a = Number($('eA').value), t = $('eT').value;
     if (!d || !(a > 0) || !t) { toast('Ne için olduğunu, tutarı ve tarihi gir.'); return; }
-    if (await mutate(() => SB.from('expenses').insert({ shop_id: SHOP.id, date: t, descr: d, amount: a }), 'Gider kaydedildi')) { P.adding = false; render(); }
+    P.adding = false;
+    const inMonth = t.startsWith(P.month), tmp = { id: 'tmp' + Date.now(), date: t, descr: d, amount: a };
+    if (M && inMonth) { M.expenses = [tmp, ...M.expenses]; cur.exp = Number(cur.exp) + a; keep(); }
+    render(); toast('Gider kaydedildi');
+    try { const r = await q(() => SB.from('expenses').insert({ shop_id: SHOP.id, date: t, descr: d, amount: a }).select('id'), 2); tmp.id = r[0].id; keep(); render(); }
+    catch (e) { if (M && inMonth) { M.expenses = M.expenses.filter(x => x !== tmp); cur.exp = Number(cur.exp) - a; keep(); } render(); toast('Kaydedilemedi, tekrar dene.'); }
   };
-  app.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = 'Emin misin?'; return; } mutate(() => SB.from('expenses').delete().eq('id', b.dataset.del), 'Silindi'); });
+  app.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+    if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = 'Emin misin?'; return; }
+    const e = M.expenses.find(x => x.id === b.dataset.del); if (!e) return;
+    M.expenses = M.expenses.filter(x => x !== e); cur.exp = Number(cur.exp) - Number(e.amount); keep(); render();
+    save(() => SB.from('expenses').delete().eq('id', e.id), () => { M.expenses.push(e); cur.exp = Number(cur.exp) + Number(e.amount); keep(); }, 'Silindi');
+  });
 }
 
 /* ---------- Ayarlar ---------- */
@@ -272,10 +323,11 @@ function tabSettings() {
     try {
       const r = await q(() => SB.from('shops').update(upd).eq('id', st.id).select('*'), 2);
       if (!r || !r.length) throw new Error('yok');
-      SHOP = r[0]; SHOPS = SHOPS.map(s => s.id === SHOP.id ? SHOP : s); svcDraft = null; P.svcOpen = false; toast('Kaydedildi'); render();
+      SHOP = r[0]; SHOPS = SHOPS.map(s => s.id === SHOP.id ? SHOP : s); store.set('bc:shops', { shops: SHOPS, sup: IS_SUPER }); svcDraft = null; P.svcOpen = false; toast('Kaydedildi'); render();
     } catch (e) { toast('Kaydedilemedi, tekrar dene.'); }
   };
 }
+
 
 /* ---------- Sesli / yazılı komut ---------- */
 const NUMW = { 'bir': 1, 'iki': 2, 'üç': 3, 'dört': 4, 'beş': 5, 'altı': 6, 'yedi': 7, 'sekiz': 8, 'dokuz': 9, 'on': 10, 'on bir': 11, 'on iki': 12, 'on üç': 13, 'on dört': 14, 'on beş': 15, 'on altı': 16, 'on yedi': 17, 'on sekiz': 18, 'on dokuz': 19, 'yirmi': 20 };
@@ -298,22 +350,23 @@ function parseCmd(raw) {
   return { time, price, status, service, name };
 }
 async function runCmd(text) {
-  const c = parseCmd(text), list = DATA.day.filter(a => a.status !== 'iptal'), nm = c.name.toLocaleLowerCase('tr');
+  const c = parseCmd(text), list = (DATA.day || []).filter(a => a.status !== 'iptal'), nm = c.name.toLocaleLowerCase('tr');
   const a = list.find(x => hm(x.time) === c.time) || (nm ? list.find(x => x.name.toLocaleLowerCase('tr').includes(nm.split(' ')[0])) : null);
-  try {
-    if (a) {
-      const upd = { status: c.status }; if (c.price != null) upd.price = c.price; if (c.service) { upd.service = c.service.name; upd.dur = c.service.dur; }
-      await q(() => SB.from('appointments').update(upd).eq('id', a.id), 2);
-      P.cmdMsg = { ok: `${hm(a.time)} ${a.name}: ${{ geldi: 'geldi', gelmedi: 'gelmedi', iptal: 'iptal edildi' }[c.status]}${c.status === 'geldi' ? ', ' + tl(c.price ?? a.price) : ''}`, undo: { id: a.id, prev: { status: a.status, price: a.price, service: a.service, dur: a.dur } } };
-    } else {
-      if (c.status !== 'geldi') { P.cmdMsg = { err: 'Bu saatte veya bu isimde randevu bulunamadı.' }; render(); return; }
-      const sv = c.service || SHOP.services[0];
-      const row = { shop_id: SHOP.id, date: P.date, time: c.time, dur: sv.dur, service: sv.name, price: c.price ?? SHOP.fee, name: c.name.length >= 2 ? c.name : 'Kapıdan gelen', phone: '', status: 'geldi', source: 'panel' };
-      const ins = await q(() => SB.from('appointments').insert(row).select('id'), 2);
-      P.cmdMsg = { ok: `${row.time} ${row.name}: geldi, ${tl(row.price)} (yeni kayıt)`, undo: { id: ins[0].id, del: true } };
-    }
-  } catch (e) { P.cmdMsg = { err: 'Kaydedilemedi, tekrar dene.' }; }
-  await refresh(true);
+  if (a) {
+    const prev = { status: a.status, price: a.price, service: a.service, dur: a.dur };
+    const upd = { status: c.status }; if (c.price != null) upd.price = c.price; if (c.service) { upd.service = c.service.name; upd.dur = c.service.dur; }
+    Object.assign(a, upd); keepDay();
+    P.cmdMsg = { ok: `${hm(a.time)} ${a.name}: ${{ geldi: 'geldi', gelmedi: 'gelmedi', iptal: 'iptal edildi' }[c.status]}${c.status === 'geldi' ? ', ' + tl(a.price) : ''}`, undo: { id: a.id, prev } };
+    render();
+    save(() => SB.from('appointments').update(upd).eq('id', a.id), () => { Object.assign(a, prev); keepDay(); P.cmdMsg = { err: 'Kaydedilemedi, tekrar dene.' }; });
+  } else {
+    if (c.status !== 'geldi') { P.cmdMsg = { err: 'Bu saatte veya bu isimde randevu bulunamadı.' }; render(); return; }
+    const sv = c.service || SHOP.services[0];
+    const row = { date: P.date, time: c.time + ':00', dur: sv.dur, service: sv.name, price: c.price ?? SHOP.fee, name: c.name.length >= 2 ? c.name : 'Kapıdan gelen', phone: '', status: 'geldi', source: 'panel' };
+    P.cmdMsg = { ok: `${c.time} ${row.name}: geldi, ${tl(row.price)} (yeni kayıt)` };
+    const id = await addAppt(row);
+    if (id && P.cmdMsg && P.cmdMsg.ok && P.cmdMsg.ok.startsWith(c.time + ' ' + row.name)) { P.cmdMsg.undo = { id, del: true }; if (!busy()) render(); }
+  }
 }
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, listening = false;
@@ -321,7 +374,12 @@ function bindCmd() {
   const inp = document.getElementById('cmd'), go = () => { const v = inp.value.trim(); if (v) { inp.value = ''; runCmd(v); } };
   document.getElementById('cmdGo').onclick = go; inp.onkeydown = e => { if (e.key === 'Enter') go(); };
   const u = document.getElementById('undo');
-  if (u) u.onclick = async () => { const x = P.cmdMsg.undo; P.cmdMsg = null; await mutate(() => x.del ? SB.from('appointments').delete().eq('id', x.id) : SB.from('appointments').update(x.prev).eq('id', x.id), 'Geri alındı'); };
+  if (u) u.onclick = () => {
+    const x = P.cmdMsg.undo; P.cmdMsg = null;
+    const a = (DATA.day || []).find(z => z.id === x.id);
+    if (x.del) { DATA.day = (DATA.day || []).filter(z => z.id !== x.id); keepDay(); render(); save(() => SB.from('appointments').delete().eq('id', x.id), null, 'Geri alındı'); }
+    else if (a) { const cur = { status: a.status, price: a.price, service: a.service, dur: a.dur }; Object.assign(a, x.prev); keepDay(); render(); save(() => SB.from('appointments').update(x.prev).eq('id', x.id), () => { Object.assign(a, cur); keepDay(); }, 'Geri alındı'); }
+  };
   const mic = document.getElementById('mic');
   if (mic) mic.onclick = () => {
     if (listening && rec) { rec.stop(); return; }
@@ -335,3 +393,4 @@ function bindCmd() {
 }
 
 boot();
+

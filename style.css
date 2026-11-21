@@ -41,7 +41,7 @@ body {
 }
 /* Arka plan: berber direği renklerinden yumuşak ışık + çok hafif çapraz şerit dokusu */
 body::before {
-  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none; transform: translateZ(0); will-change: transform;
   background:
     radial-gradient(70rem 40rem at 105% -8%, var(--glow-blue), transparent 60%),
     radial-gradient(55rem 35rem at -15% 30%, var(--glow-red), transparent 60%),
@@ -65,13 +65,14 @@ img { max-width: 100%; }
 .head { padding-top: 22px; display: flex; flex-direction: column; gap: 6px; }
 .head h1 { font: 800 30px/1.05 var(--display); letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
 .head p { margin: 0; color: var(--muted); font-size: 15px; }
-.pole {
-  height: 8px; border-radius: 4px; margin-top: 10px;
+.pole { height: 8px; border-radius: 4px; margin-top: 10px; overflow: hidden; position: relative; box-shadow: inset 0 0 0 1px rgba(0,0,0,.06); }
+.pole::before {
+  content: ""; position: absolute; top: 0; bottom: 0; left: -57px; right: 0;
   background: repeating-linear-gradient(-45deg, var(--red) 0 10px, #fff 10px 20px, #2f5fc0 20px 30px, #fff 30px 40px);
-  background-size: 56.57px 8px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.06);
+  will-change: transform;
 }
-@media (prefers-reduced-motion: no-preference) { .pole { animation: pole 3s linear infinite; } }
-@keyframes pole { to { background-position: 56.57px 0; } }
+@media (prefers-reduced-motion: no-preference) { .pole::before { animation: pole 3s linear infinite; } }
+@keyframes pole { to { transform: translateX(56.57px); } }
 
 h2 { font: 700 18px/1.2 var(--display); margin: 0; }
 .sec { display: flex; flex-direction: column; gap: 10px; }
@@ -260,3 +261,10 @@ textarea { min-height: 130px; resize: vertical; }
 .fold-in { padding: 0 16px 16px; display: flex; flex-direction: column; gap: 12px; }
 
 .steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 15px; }
+
+/* Yükleniyor iskeleti */
+.skel { height: 52px; border-radius: 10px; margin: 8px 0; background: linear-gradient(90deg, var(--sunk) 0%, var(--line) 50%, var(--sunk) 100%); background-size: 200% 100%; }
+@media (prefers-reduced-motion: no-preference) { .skel { animation: skel 1.2s ease-in-out infinite; } }
+@keyframes skel { to { background-position: -200% 0; } }
+/* Dokunmatikte gecikmesiz tıklama */
+button, a, input, select, label, summary { touch-action: manipulation; }

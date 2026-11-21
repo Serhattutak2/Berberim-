@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Berberim · Berberler için online randevu ve kasa</title>
+<meta name="description" content="Müşterilerin WhatsApp'tan gelen linkle randevu alsın, sen günün kasasını tek ekranda gör. Kurulum bizden.">
+<meta property="og:title" content="Berberim · Berberin randevu defteri artık telefonda">
+<meta property="og:description" content="Online randevu, müşteri takibi, gelir–gider. Kurulum bizden, yıllık tek ücret.">
+<meta name="theme-color" content="#15181f">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23b8242c'/%3E%3Ctext x='32' y='43' font-size='30' text-anchor='middle'%3E✂️%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&display=swap" media="print" onload="this.media='all'">
+<link rel="stylesheet" href="/style.css?v=20">
+<style>
+/* Tanıtım: koyu vitrin üstte, berber direği tek gösterişli öğe; altı sade */
+.lp { max-width: 1040px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.top { display: flex; align-items: center; justify-content: space-between; padding-block: 16px; }
+.brand { font: 800 22px var(--display); letter-spacing: -0.02em; display: flex; align-items: center; gap: 8px; color: var(--ink); text-decoration: none; }
+.brand i { width: 10px; height: 26px; border-radius: 5px; background: repeating-linear-gradient(-45deg, var(--red) 0 5px, #fff 5px 10px, #2f5fc0 10px 15px, #fff 15px 20px); box-shadow: inset 0 0 0 1px rgba(0,0,0,.1); }
+.hero { display: grid; grid-template-columns: 1.1fr .9fr; gap: 40px; align-items: center; padding-block: 24px 56px; }
+.hero h1 { font: 800 clamp(36px, 6vw, 62px)/1.02 var(--display); letter-spacing: -0.03em; margin: 0; text-wrap: balance; }
+.hero p.lead { font-size: 19px; color: var(--muted); margin-top: 16px; max-width: 34em; }
+.hero .ctas { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 24px; }
+.hero .trust { margin-top: 18px; font-size: 14px; color: var(--muted); }
+/* Demo telefon */
+.demo { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.phone { width: 290px; max-width: 100%; aspect-ratio: 290 / 590; border-radius: 42px; background: #0f1218; padding: 12px; box-shadow: 0 30px 60px -20px rgba(21,24,31,.45), inset 0 0 0 2px #2a2f3a; position: relative; }
+.screen { position: absolute; inset: 12px; border-radius: 31px; overflow: hidden; background: #f3f4f7; color: #15181f; font-size: 13px; }
+.notch { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: 92px; height: 24px; border-radius: 14px; background: #0f1218; z-index: 5; }
+.scene { position: absolute; inset: 0; padding: 46px 14px 14px; display: flex; flex-direction: column; gap: 8px; opacity: 0; transition: opacity .45s ease; }
+.scene.on { opacity: 1; }
+.wa-top { background: #075e54; color: #fff; margin: -46px -14px 8px; padding: 44px 14px 10px; font-weight: 700; font-size: 14px; }
+.wa-bg { background: #ece5dd; margin: -8px -14px -14px; padding: 12px; flex: 1; display: flex; flex-direction: column; gap: 8px; }
+.bub { max-width: 82%; padding: 7px 10px; border-radius: 10px; font-size: 13px; line-height: 1.35; opacity: 0; transform: translateY(6px); transition: opacity .35s, transform .35s; }
+.bub.in { background: #fff; align-self: flex-start; }
+.bub.out { background: #dcf8c6; align-self: flex-end; }
+.bub.show { opacity: 1; transform: none; }
+.bub u { color: #1f6fd1; }
+.m-h { font: 800 19px var(--display); }
+.m-pole { height: 5px; border-radius: 3px; background: repeating-linear-gradient(-45deg, #b8242c 0 6px, #fff 6px 12px, #2f5fc0 12px 18px, #fff 18px 24px); }
+.m-chips { display: flex; gap: 6px; }
+.m-chip { border: 1.5px solid #e1e4ec; background: #fff; border-radius: 9px; padding: 6px 8px; font-weight: 700; font-size: 12px; }
+.m-chip.on { background: #15181f; border-color: #15181f; color: #fff; }
+.m-slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.m-slot { border: 1.5px solid #e1e4ec; background: #fff; border-radius: 8px; padding: 7px 0; text-align: center; font-weight: 700; font-size: 12px; transition: background .25s, color .25s; }
+.m-slot.full { background: #eceef3; border-color: transparent; color: #98a1b5; text-decoration: line-through; }
+.m-slot.pick { background: #b8242c; border-color: #b8242c; color: #fff; }
+.m-in { border: 1.5px solid #e1e4ec; background: #fff; border-radius: 8px; padding: 8px; color: #646d82; font-size: 12px; }
+.m-btn { background: #b8242c; color: #fff; border-radius: 10px; padding: 10px; text-align: center; font-weight: 700; margin-top: auto; transition: transform .15s; }
+.m-btn.tap { transform: scale(.95); }
+.m-ok { margin: auto 0; text-align: center; display: flex; flex-direction: column; gap: 8px; align-items: center; }
+.m-ok .tick { width: 56px; height: 56px; font-size: 28px; }
+.m-kasa { background: #15181f; color: #fff; border-radius: 14px; padding: 12px 14px; }
+.m-kasa small { opacity: .7; display: block; font-size: 11px; }
+.m-kasa b { font: 800 28px var(--display); font-variant-numeric: tabular-nums; }
+.m-mic { background: #b8242c; color: #fff; border-radius: 12px; padding: 10px; text-align: center; font-weight: 700; font-size: 13px; }
+.m-mic.rec { background: #15181f; }
+.m-row { display: flex; align-items: center; gap: 8px; background: #fff; border-radius: 10px; padding: 8px 10px; border: 1px solid #e1e4ec; }
+.m-row b { font: 800 13px var(--display); min-width: 38px; }
+.m-row span { flex: 1; font-weight: 600; font-size: 12px; }
+.m-row em { font-style: normal; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 99px; background: #187a4a; color: #fff; }
+.m-row em.ok { background: #e1f3e9; color: #187a4a; }
+.cap { font-weight: 600; text-align: center; min-height: 3em; max-width: 300px; }
+.prog { display: flex; gap: 6px; align-items: center; }
+.prog button { width: 34px; height: 6px; border-radius: 3px; border: 0; background: var(--line); padding: 0; cursor: pointer; position: relative; overflow: hidden; }
+.prog button i { position: absolute; inset: 0; background: var(--red); transform-origin: left; transform: scaleX(0); }
+.prog button.done i { transform: scaleX(1); }
+.prog .pp { width: auto; height: auto; background: none; color: var(--muted); font-size: 13px; font-weight: 600; padding: 4px 8px; }
+/* Bölümler */
+.band { padding-block: 56px; }
+.band h2 { font: 800 clamp(26px, 4vw, 38px)/1.1 var(--display); letter-spacing: -0.02em; margin-bottom: 8px; text-wrap: balance; }
+.band > .lp > p.sub { color: var(--muted); font-size: 17px; max-width: 36em; }
+.steps3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; margin-top: 28px; counter-reset: st; }
+.steps3 div { border-top: 3px solid var(--ink); padding-top: 14px; }
+.steps3 div::before { counter-increment: st; content: counter(st); font: 800 34px var(--display); color: var(--red); display: block; }
+.steps3 h3 { font: 700 19px var(--display); margin: 6px 0; }
+.steps3 p { color: var(--muted); }
+.feat { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 40px; margin-top: 24px; }
+.feat div { padding: 16px 0; border-top: 1px solid var(--line); }
+.feat h3 { font: 700 17px var(--display); margin: 0 0 4px; }
+.feat p { color: var(--muted); }
+.price { background: var(--ink); color: var(--surface); border-radius: 24px; padding: 32px; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: center; }
+.price .amt { font: 800 clamp(44px, 8vw, 72px)/1 var(--display); letter-spacing: -0.03em; }
+.price .per { opacity: .7; margin-top: 6px; }
+.price ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.price li::before { content: "✓"; color: #5cc690; font-weight: 800; margin-right: 8px; }
+.faq details { border-top: 1px solid var(--line); padding: 14px 0; }
+.faq summary { font: 700 17px var(--display); cursor: pointer; }
+.faq details p { color: var(--muted); margin-top: 8px; max-width: 40em; }
+.apply { display: grid; grid-template-columns: .9fr 1.1fr; gap: 32px; align-items: start; }
+.apply form { display: flex; flex-direction: column; gap: 12px; }
+.ok-box { background: var(--ok-soft); color: var(--ok); border-radius: 14px; padding: 18px; font-weight: 600; }
+.lp-foot { padding-block: 28px 40px; color: var(--muted); font-size: 14px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-top: 1px solid var(--line); }
+.lp-foot a { color: inherit; }
+@media (max-width: 820px) {
+  .hero, .apply, .price { grid-template-columns: 1fr; }
+  .hero { gap: 28px; padding-block: 8px 40px; }
+  .steps3, .feat { grid-template-columns: 1fr; gap: 18px; }
+  .feat { gap: 0; }
+  .band { padding-block: 40px; }
+  .price { padding: 24px; }
+}
+</style>
+</head>
+<body>
+<div class="lp"><header class="top"><a class="brand" href="/tanitim/"><i aria-hidden="true"></i>Berberim</a><a class="btn sm dark" href="#basvuru">Başvur</a></header></div>
+
+<main>
+  <section class="lp hero">
+    <div>
+      <h1>Berberinin randevu defteri artık telefonda.</h1>
+      <p class="lead">Müşterin WhatsApp'tan gelen linke dokunur, boş saati seçer, randevusunu alır. Sen de günün kasasını, gelen müşteriyi ve aylık kârını tek ekranda görürsün.</p>
+      <div class="ctas"><a class="btn" href="#basvuru">Başvuru yap</a><a class="btn ghost" id="waTop" href="#basvuru">WhatsApp'tan sor</a></div>
+      <p class="trust">Uygulama indirmek yok. Kurulumu biz yaparız, dükkanına özel linkin hazır gelir.</p>
+    </div>
+    <div class="demo">
+      <div class="phone" aria-label="Berberim'in nasıl çalıştığını gösteren canlı demo"><div class="notch"></div><div class="screen" id="screen">
+        <div class="scene" data-s="0"><div class="wa-top">Usta Berber</div><div class="wa-bg">
+          <div class="bub out">Merhaba, yarın için randevu var mı?</div>
+          <div class="bub in">Merhaba, Usta Berber'e hoş geldiniz ✂️ Boş saatleri görüp randevunuzu buradan alabilirsiniz:<br><u>berberim/?usta-berber</u></div>
+        </div></div>
+        <div class="scene" data-s="1">
+          <div class="m-h">Usta Berber</div><div class="m-pole"></div>
+          <div class="m-chips"><span class="m-chip on">Saç kesimi</span><span class="m-chip">Sakal</span><span class="m-chip">Saç + Sakal</span></div>
+          <div class="m-chips"><span class="m-chip">Bugün</span><span class="m-chip on">Yarın</span><span class="m-chip">Pzt</span><span class="m-chip">Sal</span></div>
+          <div class="m-slots"><span class="m-slot full">10:00</span><span class="m-slot full">10:30</span><span class="m-slot">11:00</span><span class="m-slot full">11:30</span><span class="m-slot" id="pickSlot">14:00</span><span class="m-slot">14:30</span><span class="m-slot">15:00</span><span class="m-slot full">15:30</span><span class="m-slot">16:00</span></div>
+          <div class="m-in" id="typeName">Adınız ve soyadınız</div><div class="m-in">05xx xxx xx xx</div>
+          <div class="m-btn" id="okBtn">Onayla</div>
+        </div>
+        <div class="scene" data-s="2"><div class="m-h">Usta Berber</div><div class="m-pole"></div>
+          <div class="m-ok"><div class="tick">✓</div><b style="font-size:16px">Randevunuz alındı</b><span>Yarın, saat 14:00<br>Saç kesimi</span></div></div>
+        <div class="scene" data-s="3"><div class="m-h">Bugün</div>
+          <div class="m-kasa"><small>Bugünün kasası</small><b id="kasaNum">2.400 ₺</b></div>
+          <div class="m-mic" id="mMic">🎤 Konuşarak kaydet</div>
+          <div class="m-row"><b>13:00</b><span>Ali Demir</span><em class="ok">Geldi</em></div>
+          <div class="m-row"><b>14:00</b><span>Mehmet Kaya</span><em id="mGeldi">Geldi</em></div>
+          <div class="m-row"><b>15:30</b><span>Emre Şahin</span><em>Geldi</em></div>
+        </div>
+      </div></div>
+      <p class="cap" id="cap" aria-live="polite"></p>
+      <div class="prog" id="prog"></div>
+    </div>
+  </section>
+
+  <section class="band" style="background:var(--surface)"><div class="lp">
+    <h2>Üç adımda çalışır</h2>
+    <p class="sub">Berberin ya da müşterinin bir şey yüklemesine gerek yok.</p>
+    <div class="steps3">
+      <div><h3>Linkin hazır gelir</h3><p>Dükkanına özel randevu linkini ve paneline giriş bilgilerini biz veririz. Kurulum yarım saat sürmez.</p></div>
+      <div><h3>Müşteri saatini seçer</h3><p>WhatsApp'tan yazan müşteriye link otomatik gider. Boş saatleri görür, adını ve telefonunu yazıp randevuyu alır.</p></div>
+      <div><h3>Sen işine bakarsın</h3><p>Gelen müşteriye "Geldi" dersin ya da mikrofona söylersin. Kasa, müşteri listesi ve aylık kâr kendiliğinden tutulur.</p></div>
+    </div>
+  </div></section>
+
+  <section class="band"><div class="lp">
+    <h2>Dükkanın için gereken her şey</h2>
+    <div class="feat">
+      <div><h3>Online randevu</h3><p>Dolu saatler kapalı görünür, aynı saate iki kişi randevu alamaz. Müşteri kimin randevu aldığını ve fiyatları görmez.</p></div>
+      <div><h3>Sesle kayıt</h3><p>"Saat 3'te Ahmet geldi 600" demen yeterli. Kapıdan gelen müşteri de kasaya işlenir.</p></div>
+      <div><h3>Günlük kasa ve aylık kâr</h3><p>Gelir, gider ve net kâr hesaplanır; son 6 ayı grafikte görürsün.</p></div>
+      <div><h3>Müşteri defteri</h3><p>Kim kaç kez geldi, ne harcadı, kim uzun süredir uğramadı. Tek dokunuşla WhatsApp'tan davet edersin.</p></div>
+      <div><h3>Hatırlatma</h3><p>Randevusu olan müşteriye hazır mesajla WhatsApp'tan hatırlatma gönderirsin.</p></div>
+      <div><h3>Kendi saatlerin, kendi hizmetlerin</h3><p>Çalışma saatleri, kapalı günler, 15–60 dakikalık aralıklar ve hizmet süreleri senin elinde.</p></div>
+    </div>
+  </div></section>
+
+  <section class="band" style="padding-top:0"><div class="lp">
+    <div class="price">
+      <div><p style="opacity:.7">Yıllık abonelik</p><div class="amt" id="priceAmt">5.000 ₺</div><p class="per" id="pricePer">ayda yaklaşık 417 ₺</p></div>
+      <ul><li>Dükkanına özel randevu linki</li><li>Sınırsız randevu ve müşteri</li><li>Kasa, gider ve kâr takibi</li><li>Kurulum ve destek bizden</li><li>Ek ücret yok</li></ul>
+    </div>
+  </div></section>
+
+  <section class="band" style="background:var(--surface)"><div class="lp faq">
+    <h2>Sık sorulanlar</h2>
+    <details><summary>Müşterilerim uygulama indirecek mi?</summary><p>Hayır. Müşteri sadece linke dokunur, sayfa telefonda açılır. Sen de paneli telefonun ana ekranına ekleyip uygulama gibi kullanırsın.</p></details>
+    <details><summary>WhatsApp'a otomatik link nasıl gidiyor?</summary><p>WhatsApp Business'ın ücretsiz "Uzakta mesajı" özelliğini kullanıyoruz. Kurulumda birlikte ayarlarız; yazan müşteriye randevu linki otomatik gider.</p></details>
+    <details><summary>Fiyatlarımı müşteriler görür mü?</summary><p>Görmez. Ücretler sadece senin kasanda tutulur. Müşteri sadece boş saatleri görür.</p></details>
+    <details><summary>Aboneliğim biterse verilerim silinir mi?</summary><p>Silinmez. Yenilediğin anda her şey kaldığı yerden açılır.</p></details>
+    <details><summary>İnternet kesilirse ne olur?</summary><p>Panel son bilgileri telefonunda tutar; internet gelince kendiliğinden günceller.</p></details>
+  </div></section>
+
+  <section class="band" id="basvuru"><div class="lp apply">
+    <div><h2>Başvuru yap</h2><p class="muted" style="font-size:17px">Bilgilerini bırak, seni arayıp dükkanına göre kurulumu yapalım. Hiçbir ödeme bilgisi istemiyoruz.</p>
+      <p class="muted" id="sellerLine" style="margin-top:14px"></p></div>
+    <form id="form" novalidate>
+      <label for="fShop">Dükkan adı<input id="fShop" maxlength="80" autocomplete="organization" required></label>
+      <label for="fName">Adın soyadın<input id="fName" maxlength="80" autocomplete="name" required></label>
+      <div class="row"><label for="fPhone">Telefon<input id="fPhone" type="tel" inputmode="tel" maxlength="20" autocomplete="tel" placeholder="05xx xxx xx xx" required></label><label for="fCity">İl / ilçe<input id="fCity" maxlength="80"></label></div>
+      <label for="fNote">Not (isteğe bağlı)<textarea id="fNote" maxlength="500" style="min-height:90px" placeholder="Kaç koltuk var, ne zaman aranmak istersin…"></textarea></label>
+      <p class="err" id="fErr" hidden></p>
+      <button class="btn" id="fGo" type="submit">Başvuruyu gönder</button>
+    </form>
+  </div></section>
+</main>
+
+<div class="lp"><footer class="lp-foot"><span>Berberim · Berberler için online randevu</span><a href="/panel/">Berber girişi</a></footer></div>
+
+<script defer src="/vendor/supabase.js"></script>
+<script defer src="/config.js?v=20"></script>
+<script defer src="/common.js?v=20"></script>
+<script defer src="/tanitim/tanitim.js?v=20"></script>
+</body>
+</html>

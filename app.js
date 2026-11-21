@@ -141,17 +141,7 @@ function renderMine(seg) {
   });
 }
 
-/* Link olmadan açılırsa: ürün tanıtımı */
-async function landing() {
-  document.title = 'Berberim · Berberler için online randevu';
-  let seller = null; try { seller = await q(() => SB.rpc('seller_info')); } catch (e) {}
-  const ph = seller && seller.phone;
-  app.innerHTML = `<header class="head"><h1>Berberim</h1><p>Berberler için online randevu ve kasa defteri.</p><div class="pole" aria-hidden="true"></div></header>
-  <section class="sec"><h2>Müşterilerin için</h2><p class="muted">WhatsApp'tan gelen linke dokunur, boş saati görür, adını ve telefonunu yazıp randevusunu alır. Kimin randevu aldığını ve fiyatları göremez.</p></section>
-  <section class="sec"><h2>Senin için</h2><p class="muted">Günün randevuları, gelen müşteri sayısı, aylık gelir–gider ve net kâr tek ekranda. Kapıdan gelen müşteriyi mikrofona söyleyerek kaydedersin.</p></section>
-  <section class="sec"><h2>Yıllık abonelik</h2><p class="muted">Kurulumu biz yaparız, dükkanına özel linkin hazır gelir.</p>
-  ${ph ? `<a class="btn" href="https://wa.me/${waNum(ph)}?text=${encodeURIComponent('Merhaba, Berberim hakkında bilgi almak istiyorum.')}" target="_blank" rel="noopener">WhatsApp'tan bilgi al</a><p class="muted">${esc(seller.name)} · ${esc(ph)}</p>` : ''}</section>
-  <p class="foot"><a href="/panel/">Berber girişi</a></p>`;
-}
+/* Link olmadan açılırsa tanıtım sayfasına git */
+function landing() { location.replace('/tanitim/'); }
 
 init();

@@ -1,6 +1,6 @@
 /* Berberim · Patron (satıcı) paneli — sadece super_admin */
 const app = document.getElementById('app'), tabbar = document.getElementById('tabbar');
-const S = { tab: 'berber', shops: [], payments: [], settings: null, open: null, mode: null, form: {}, done: null };
+const S = { tab: 'berber', shops: [], payments: [], leads: [], settings: null, open: null, mode: null, form: {}, done: null };
 const ERRS = {
   LINK: 'Link sadece küçük harf, rakam ve tire içerebilir (en az 3 karakter).', LINK_DOLU: 'Bu link başka bir dükkanda kullanılıyor.',
   AD: 'Dükkan adını yaz.', KULLANICI: 'Kullanıcı adı en az 3 karakter olmalı; sadece küçük harf, rakam, nokta ve tire.',
@@ -50,16 +50,17 @@ function login(msg) {
   document.getElementById('go').onclick = go; document.getElementById('pw').onkeydown = e => { if (e.key === 'Enter') go(); };
 }
 async function load() {
-  const [shops, pays, st] = await Promise.all([q(() => SB.rpc('p_shops')), q(() => SB.rpc('p_payments')), q(() => SB.rpc('p_settings'))]);
-  S.shops = shops || []; S.payments = pays || []; S.settings = st;
+  const [shops, pays, st, leads] = await Promise.all([q(() => SB.rpc('p_shops')), q(() => SB.rpc('p_payments')), q(() => SB.rpc('p_settings')), q(() => SB.rpc('p_leads')).catch(() => [])]);
+  S.shops = shops || []; S.payments = pays || []; S.settings = st; S.leads = leads || [];
 }
 
 function render() {
-  const tabs = [['berber', 'Aboneler', ICON.shop], ['para', 'Ödemeler', ICON.cash], ['ayar', 'Ayarlar', ICON.gear]];
+  const nNew = S.leads.filter(l => l.status === 'yeni').length;
+  const tabs = [['berber', 'Aboneler', ICON.shop], ['basvuru', 'Başvurular' + (nNew ? ` (${nNew})` : ''), ICON.people], ['para', 'Ödemeler', ICON.cash], ['ayar', 'Ayarlar', ICON.gear]];
   tabbar.hidden = false;
   tabbar.innerHTML = `<div class="tabbar-in">${tabs.map(([k, v, i]) => `<button class="${S.tab === k ? 'on' : ''}" data-tab="${k}">${i}<span>${v}</span></button>`).join('')}</div>`;
   tabbar.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; S.open = null; S.mode = null; window.scrollTo(0, 0); render(); });
-  ({ berber: tabShops, para: tabPay, ayar: tabSettings })[S.tab]();
+  ({ berber: tabShops, basvuru: tabLeads, para: tabPay, ayar: tabSettings })[S.tab]();
 }
 const status = s => {
   if (isFree(s)) return '<span class="pill p-ok">Süresiz</span>';
@@ -120,6 +121,7 @@ function tabShops() {
       try {
         const r = await fn(body);
         const text = `Merhaba ${first}, Berberim hesabın hazır ✂️\n\nBerber paneli: ${panelUrl()}\nKullanıcı adı: ${body.username}\nŞifre: ${body.password}\n\nMüşterilerine göndereceğin randevu linki:\n${shopLinkFor(body.slug)}\n\nAbonelik: ${monthsTxt(body.months)}, ${fmtDs(r.paid_until)} tarihine kadar.`;
+        if (S.form.leadId || S.leadId) { try { await q(() => SB.rpc('p_lead_status', { p_id: S.leadId, p_status: 'abone' }), 1); } catch (x) {} S.leadId = null; }
         S.done = { name: body.name, phone: body.phone, text }; S.mode = null; S.form = {};
         await load(); render(); window.scrollTo(0, 0);
       } catch (e) { b.disabled = false; b.textContent = 'Aboneyi oluştur'; er.textContent = e.message; er.hidden = false; }
@@ -171,6 +173,32 @@ function bindShopItems() {
     if (x === 'passGo') return act(async () => { const username = $('rU').value, password = $('rP').value.trim(); await fn({ action: 'reset_password', username, password }); await copyText(`Berberim yeni şifren\nKullanıcı adı: ${username}\nŞifre: ${password}\nGiriş: ${panelUrl()}`); }, 'Şifre değişti, bilgiler kopyalandı');
     if (x === 'memberGo') return act(() => fn({ action: 'add_member', shop_id: id, username: $('mU').value.trim(), password: $('mP').value.trim() }), 'Kullanıcı eklendi');
     if (x === 'editGo') { const s = S.shops.find(z => z.id === id); return act(() => q(() => SB.rpc('p_update_shop2', { p_shop: id, p_name: $('eN').value.trim(), p_owner: $('eO').value.trim(), p_slug: $('eS').value.trim().toLowerCase(), p_note: $('eNo').value, p_paid_until: $('eU') ? $('eU').value : s.paid_until, p_phone: $('eP').value.trim() }), 1), 'Kaydedildi'); }
+  });
+}
+
+const LST = { yeni: '<span class="pill p-warn">Yeni</span>', 'goruşuldu': '<span class="pill p-wait">Görüşüldü</span>', abone: '<span class="pill p-ok">Abone oldu</span>', iptal: '<span class="pill p-no">Vazgeçti</span>' };
+function tabLeads() {
+  app.innerHTML = `<header class="head"><h1>Başvurular</h1><p>Tanıtım sayfasından gelenler</p></header>
+  <div class="note small">Tanıtım linki: ${esc(base() + '/tanitim/')} <button class="link" id="cpT">Kopyala</button></div>
+  <div class="card"><div class="list">${S.leads.map(l => `<div class="item"><div class="main">
+    <div class="sec-h"><b>${esc(l.shop_name)}</b>${LST[l.status] || ''}</div>
+    <div class="muted small">${esc(l.person)} · ${esc(l.phone)}${l.city ? ' · ' + esc(l.city) : ''} · ${esc(fmtDs(String(l.created_at).slice(0, 10)))}</div>
+    ${l.note ? `<div class="note small">${esc(l.note)}</div>` : ''}
+    <div class="acts"><a class="btn ok sm" target="_blank" rel="noopener" href="https://wa.me/${waNum(l.phone)}?text=${encodeURIComponent('Merhaba ' + l.person.split(' ')[0] + ', Berberim başvurunuz için yazıyorum.')}">WhatsApp</a><a class="btn ghost sm" href="tel:${esc(digits(l.phone))}">Ara</a>
+    ${l.status !== 'abone' ? `<button class="btn dark sm" data-conv="${l.id}">Aboneye çevir</button>` : ''}
+    ${l.status === 'yeni' ? `<button class="btn ghost sm" data-ls="goruşuldu" data-id="${l.id}">Görüşüldü</button>` : ''}${l.status !== 'iptal' && l.status !== 'abone' ? `<button class="btn ghost sm" data-ls="iptal" data-id="${l.id}">Vazgeçti</button>` : ''}</div>
+  </div></div>`).join('') || '<p class="empty">Henüz başvuru yok. Tanıtım linkini paylaştığında buraya düşer.</p>'}</div></div>`;
+  document.getElementById('cpT').onclick = () => copyText(base() + '/tanitim/');
+  app.querySelectorAll('[data-ls]').forEach(b => b.onclick = async () => {
+    const l = S.leads.find(x => x.id === b.dataset.id), prev = l.status; l.status = b.dataset.ls; render();
+    try { await q(() => SB.rpc('p_lead_status', { p_id: l.id, p_status: l.status }), 1); } catch (e) { l.status = prev; render(); toast('Kaydedilemedi.'); }
+  });
+  app.querySelectorAll('[data-conv]').forEach(b => b.onclick = () => {
+    const l = S.leads.find(x => x.id === b.dataset.conv), parts = l.person.trim().split(/\s+/);
+    const last = parts.length > 1 ? parts.pop() : '', first = parts.join(' ');
+    S.leadId = l.id; S.tab = 'berber'; S.mode = 'new'; S.done = null;
+    S.form = { name: l.shop_name, first, last, user: userify(first, last), pass: genPass(), phone: l.phone, slug: slugify(l.shop_name), months: 12, note: l.city };
+    window.scrollTo(0, 0); render();
   });
 }
 
