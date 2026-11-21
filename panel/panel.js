@@ -35,18 +35,18 @@ function renderLogin(msg) {
   tabbar.hidden = true;
   app.innerHTML = `<header class="head"><h1>Berber girişi</h1><p>Hesap bilgilerini sana Berberim verdi.</p><div class="pole" aria-hidden="true"></div></header>
   <section class="sec">
-    <label for="em">E-posta<input id="em" type="email" autocomplete="email" inputmode="email"></label>
+    <label for="em">Kullanıcı adı<input id="em" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
     <label for="pw">Şifre<input id="pw" type="password" autocomplete="current-password"></label>
     ${msg ? `<p class="err" role="alert">${esc(msg)}</p>` : ''}
     <button class="btn" id="go">Giriş yap</button>
     <p class="muted small">Şifreni unuttuysan Berberim'e yaz, yenisini verelim.</p>
   </section>`;
   const go = async () => {
-    const email = document.getElementById('em').value.trim(), password = document.getElementById('pw').value;
-    if (!email || !password) return renderLogin('E-posta ve şifreni yaz.');
+    const login = document.getElementById('em').value.trim().toLowerCase(), email = login.includes('@') ? login : login + '@uye.berberim.app', password = document.getElementById('pw').value;
+    if (!login || !password) return renderLogin('Kullanıcı adını ve şifreni yaz.');
     const b = document.getElementById('go'); b.disabled = true; b.textContent = 'Giriş yapılıyor…';
     const { error } = await SB.auth.signInWithPassword({ email, password });
-    if (error) return renderLogin(/invalid/i.test(error.message) ? 'E-posta veya şifre yanlış.' : 'Giriş yapılamadı: ' + error.message);
+    if (error) return renderLogin(/invalid/i.test(error.message) ? 'Kullanıcı adı veya şifre yanlış.' : 'Giriş yapılamadı: ' + error.message);
     boot();
   };
   document.getElementById('go').onclick = go;

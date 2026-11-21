@@ -1,7 +1,7 @@
 /* Berberim — ortak stil
    Yön: berber dükkanı porselen beyazı + direk kırmızısı/mavisi. Tek gösterişli öğe direk şeridi; geri kalan sade. */
 :root {
-  --bg: #f3f4f7;
+  --bg: #eef1f7;
   --surface: #ffffff;
   --sunk: #eceef3;
   --ink: #15181f;
@@ -19,6 +19,9 @@
   --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
   --body: "Figtree", "Segoe UI", system-ui, sans-serif;
   --r: 14px;
+  --glow-blue: rgba(35, 80, 160, .16);
+  --glow-red: rgba(184, 36, 44, .11);
+  --stripe: rgba(21, 24, 31, .028);
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -26,14 +29,24 @@
     --bg: #0e1118; --surface: #171b25; --sunk: #1e2330; --ink: #eceff5; --muted: #98a1b5; --line: #2a3142;
     --red: #e2464d; --blue: #7ea2ec; --blue-soft: #1c2a45; --ok: #5cc690; --ok-soft: #133024;
     --warn: #e9ad54; --warn-soft: #33260f; --bad-soft: #3a1c1e; color-scheme: dark;
+    --glow-blue: rgba(80, 125, 220, .2); --glow-red: rgba(226, 70, 77, .13); --stripe: rgba(255, 255, 255, .025);
   }
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
 body {
-  margin: 0; background: var(--bg); color: var(--ink);
+  margin: 0; background: var(--bg); color: var(--ink); position: relative; isolation: isolate;
   font: 16px/1.45 var(--body); min-height: 100vh;
   padding-top: env(safe-area-inset-top, 0px);
+}
+/* Arka plan: berber direği renklerinden yumuşak ışık + çok hafif çapraz şerit dokusu */
+body::before {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(70rem 40rem at 105% -8%, var(--glow-blue), transparent 60%),
+    radial-gradient(55rem 35rem at -15% 30%, var(--glow-red), transparent 60%),
+    radial-gradient(60rem 40rem at 50% 115%, var(--glow-blue), transparent 60%),
+    repeating-linear-gradient(-45deg, var(--stripe) 0 2px, transparent 2px 22px);
 }
 button, input, select, textarea { font: inherit; color: inherit; }
 img { max-width: 100%; }
