@@ -244,6 +244,8 @@ function tabSettings() {
   <details class="fold" ${P.svcOpen ? 'open' : ''}><summary>Hizmetler</summary><div class="fold-in"><div class="list">${svcDraft.map((s, i) => `<div class="item"><div class="main"><div class="row"><input id="vn${i}" maxlength="40" value="${esc(s.name)}" aria-label="Hizmet adı" style="flex:2 1 140px"><select id="vd${i}" aria-label="Süre" style="flex:1 1 90px">${[10, 15, 20, 30, 40, 45, 60, 75, 90, 120].map(v => `<option value="${v}" ${s.dur == v ? 'selected' : ''}>${v} dk</option>`).join('')}</select></div></div>${svcDraft.length > 1 ? `<button class="btn ghost sm" data-rm="${i}" aria-label="Sil">Sil</button>` : ''}</div>`).join('')}</div>
     <button class="btn ghost sm" id="addSvc">+ Hizmet ekle</button></div></details>
   <details class="fold"><summary>WhatsApp otomatik mesajı</summary><div class="fold-in">
+    <ol class="steps"><li>Aşağıdaki "Mesajı kopyala"ya bas.</li><li>WhatsApp Business → Araçlar → <b>Uzakta mesajı</b>'nı aç, mesajı yapıştır.</li><li>Zamanlama: <b>Her zaman gönder</b>, Alıcılar: <b>Herkes</b> → Kaydet.</li><li><b>Karşılama mesajı</b>nı kapat (çift mesaj gitmesin).</li></ol>
+    <p class="muted small">WhatsApp bu mesajı aynı müşteriye günde bir kez otomatik gönderir.</p>
     <label for="sM">Mesaj<textarea id="sM">${esc(st.msg)}</textarea></label>
     <div class="note" id="prev" style="white-space:pre-wrap"></div><button class="btn ghost" id="cp">Mesajı kopyala</button></div></details>
   <button class="btn" id="sv">Kaydet</button>

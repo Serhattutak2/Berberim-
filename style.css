@@ -258,3 +258,5 @@ textarea { min-height: 130px; resize: vertical; }
 .fold summary::after { content: "+"; font-size: 22px; color: var(--muted); }
 .fold[open] summary::after { content: "−"; }
 .fold-in { padding: 0 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+
+.steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 15px; }
