@@ -1,144 +1,171 @@
-/* Berberim · berber paneli (sadece yönetici hesabı veri görebilir) */
-let SHOP = null, FEE = 500;
-const P = { tab: 'gun', date: ymd(new Date()), month: ymd(new Date()).slice(0, 7), q: '', adding: false, edit: null, cmdMsg: null, authMode: 'giris' };
-const DATA = { day: [], week: [], all: null, monthAppts: [], expenses: [] };
-const app = () => document.getElementById('app');
+/* Berberim · berber paneli */
+let SHOP = null, SHOPS = [], IS_SUPER = false;
+const P = { tab: 'gun', date: ymd(new Date()), month: ymd(new Date()).slice(0, 7), q: '', adding: false, edit: null, cmdMsg: null };
+const DATA = { day: [], week: [], all: null, six: [], sixExp: [] };
+const app = document.getElementById('app'), tabbar = document.getElementById('tabbar');
 const pill = s => ({ bekliyor: '<span class="pill p-wait">Bekliyor</span>', geldi: '<span class="pill p-ok">Geldi</span>', gelmedi: '<span class="pill p-no">Gelmedi</span>', iptal: '<span class="pill p-warn">İptal</span>' }[s]);
-const header = () => `<header class="hero"><span class="eyebrow">Berber paneli</span><h1>${esc(SHOP ? SHOP.name : 'Berberim')}</h1></header>`;
-function failBox(msg, e) { app().innerHTML = header() + `<section class="box" style="text-align:center"><p style="margin:0">${esc(msg)}</p><p class="meta" style="margin:0;font-size:11px;opacity:.7">${esc((e && (e.message || e.code)) || '')}</p><button class="btn" onclick="location.reload()">Tekrar dene</button></section>`; }
+const isOpen = s => s.active && daysUntil(s.paid_until) >= 0;
 
 /* ---------- Giriş ---------- */
 async function boot() {
   try {
     const { data } = await SB.auth.getSession();
     if (!data.session) return renderLogin();
-    const ok = await q(() => SB.rpc('claim_admin'));
-    if (!ok) { app().innerHTML = header() + `<section class="box"><h2>Yetki yok</h2><p class="meta" style="margin:0">Bu hesap berber hesabı değil.</p><button class="btn sec" id="lo">Çıkış yap</button></section>`; document.getElementById('lo').onclick = logout; return; }
-    await loadShop();
+    const [shops, sup] = await Promise.all([q(() => SB.from('shops').select('*').order('name')), q(() => SB.rpc('is_super')).catch(() => false)]);
+    SHOPS = shops || []; IS_SUPER = !!sup;
+    if (!SHOPS.length) {
+      tabbar.hidden = true;
+      app.innerHTML = `<header class="head"><h1>Dükkan bulunamadı</h1><p>Bu hesaba bağlı bir dükkan yok.</p></header>
+        ${IS_SUPER ? '<a class="btn" href="/patron/">Patron paneline git</a>' : ''}<button class="btn ghost" id="lo">Çıkış yap</button>`;
+      document.getElementById('lo').onclick = logout; return;
+    }
+    const remembered = store.get('berberim_shop');
+    SHOP = SHOPS.find(s => s.id === remembered) || SHOPS[0];
+    if (!isOpen(SHOP)) return renderLocked();
     await refresh();
     setInterval(() => { if (!document.hidden && !P.adding && P.edit === null && P.tab === 'gun') refresh(true); }, 60000);
-  } catch (e) { failBox('Bağlantı kurulamadı. İnternetinizi kontrol edin.', e); }
+  } catch (e) {
+    tabbar.hidden = true;
+    app.innerHTML = `<header class="head"><h1>Bağlantı kurulamadı</h1><p>İnternetinizi kontrol edip tekrar deneyin.</p></header><button class="btn dark" onclick="location.reload()">Tekrar dene</button><p class="foot">${esc((e && (e.message || e.code)) || '')}</p>`;
+  }
 }
 async function logout() { await SB.auth.signOut(); location.reload(); }
+
 function renderLogin(msg) {
-  const reg = P.authMode === 'kayit';
-  app().innerHTML = header() + `<section class="box"><h2>${reg ? 'Berber hesabı oluştur' : 'Giriş yap'}</h2>
-    <label for="em">E-posta<input id="em" type="email" autocomplete="email"></label>
-    <label for="pw">Şifre<input id="pw" type="password" autocomplete="${reg ? 'new-password' : 'current-password'}" minlength="8"></label>
-    <p class="err" id="aErr" ${msg ? '' : 'hidden'}>${esc(msg || '')}</p>
-    <button class="btn" id="go">${reg ? 'Hesap oluştur' : 'Giriş yap'}</button>
-    <button class="btn sec sm" id="sw">${reg ? 'Hesabım var, giriş yap' : 'İlk kurulum: berber hesabı oluştur'}</button>
-    <p class="meta" style="margin:0">${reg ? 'İlk oluşturulan hesap berber hesabı olur. Sonradan kimse başka yönetici hesabı açamaz.' : 'Bu sayfa sadece berber içindir.'}</p></section>`;
-  document.getElementById('sw').onclick = () => { P.authMode = reg ? 'giris' : 'kayit'; renderLogin(); };
+  tabbar.hidden = true;
+  app.innerHTML = `<header class="head"><h1>Berber girişi</h1><p>Hesap bilgilerini sana Berberim verdi.</p><div class="pole" aria-hidden="true"></div></header>
+  <section class="sec">
+    <label for="em">E-posta<input id="em" type="email" autocomplete="email" inputmode="email"></label>
+    <label for="pw">Şifre<input id="pw" type="password" autocomplete="current-password"></label>
+    ${msg ? `<p class="err" role="alert">${esc(msg)}</p>` : ''}
+    <button class="btn" id="go">Giriş yap</button>
+    <p class="muted small">Şifreni unuttuysan Berberim'e yaz, yenisini verelim.</p>
+  </section>`;
   const go = async () => {
     const email = document.getElementById('em').value.trim(), password = document.getElementById('pw').value;
-    if (!email || password.length < 8) return renderLogin('E-posta ve en az 8 karakterli şifre girin.');
-    const b = document.getElementById('go'); b.disabled = true; b.textContent = 'Bekleyin…';
-    try {
-      if (reg) {
-        const { data, error } = await SB.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + '/panel/' } });
-        if (error) throw error;
-        if (!data.session) { P.authMode = 'giris'; return renderLogin('Hesap oluşturuldu. E-postana gelen onay linkine dokun, sonra buradan giriş yap.'); }
-      } else {
-        const { error } = await SB.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-      }
-      boot();
-    } catch (e) {
-      const m = e.message || '';
-      renderLogin(/invalid login/i.test(m) ? 'E-posta veya şifre yanlış.' : /not confirmed/i.test(m) ? 'Önce e-postana gelen onay linkine dokun.' : /already registered/i.test(m) ? 'Bu e-posta zaten kayıtlı, giriş yapın.' : 'İşlem yapılamadı: ' + m);
-    }
+    if (!email || !password) return renderLogin('E-posta ve şifreni yaz.');
+    const b = document.getElementById('go'); b.disabled = true; b.textContent = 'Giriş yapılıyor…';
+    const { error } = await SB.auth.signInWithPassword({ email, password });
+    if (error) return renderLogin(/invalid/i.test(error.message) ? 'E-posta veya şifre yanlış.' : 'Giriş yapılamadı: ' + error.message);
+    boot();
   };
   document.getElementById('go').onclick = go;
   document.getElementById('pw').onkeydown = e => { if (e.key === 'Enter') go(); };
 }
 
-/* ---------- Veri ---------- */
-async function loadShop() {
-  const [s, p] = await Promise.all([q(() => SB.from('shop').select('*').eq('id', 1)), q(() => SB.from('shop_private').select('fee').eq('id', 1))]);
-  SHOP = s[0]; SHOP.open_time = hm(SHOP.open_time); SHOP.close_time = hm(SHOP.close_time); FEE = p[0] ? p[0].fee : 500;
+async function renderLocked() {
+  tabbar.hidden = true;
+  let seller = null; try { seller = await q(() => SB.rpc('seller_info')); } catch (e) {}
+  const expired = daysUntil(SHOP.paid_until) < 0;
+  app.innerHTML = `<header class="head"><h1>${esc(SHOP.name)}</h1><div class="pole" aria-hidden="true"></div></header>
+  <div class="card lock"><h2>${expired ? 'Aboneliğin sona erdi' : 'Hesabın durduruldu'}</h2>
+    <p class="muted">${expired ? `Aboneliğin ${esc(fmtDs(SHOP.paid_until))} tarihinde bitti. ` : ''}Verilerin silinmedi; yenileme yapılınca her şey kaldığı yerden açılır. Bu sürede müşterilerin online randevu alamaz.</p>
+    ${seller && seller.phone ? `<a class="btn" href="https://wa.me/${waNum(seller.phone)}?text=${encodeURIComponent(SHOP.name + ' için Berberim aboneliğimi yenilemek istiyorum.')}" target="_blank" rel="noopener">Yenilemek için yaz</a><p class="muted">${esc(seller.name)} · ${esc(seller.phone)}</p>` : ''}
+  </div>
+  ${SHOPS.length > 1 ? shopSwitch() : ''}${IS_SUPER ? '<a class="btn ghost" href="/patron/">Patron paneli</a>' : ''}
+  <button class="btn ghost" id="lo">Çıkış yap</button>`;
+  document.getElementById('lo').onclick = logout; bindSwitch();
 }
+
+/* ---------- Veri ---------- */
 async function refresh(silent) {
   try {
+    const sid = SHOP.id;
     if (P.tab === 'gun') {
       const from = ymd(addDays(new Date(), -6));
       const [day, week] = await Promise.all([
-        q(() => SB.from('appointments').select('*').eq('date', P.date).order('time')),
-        q(() => SB.from('appointments').select('date,status').gte('date', from).lte('date', ymd(new Date())).eq('status', 'geldi'))
+        q(() => SB.from('appointments').select('*').eq('shop_id', sid).eq('date', P.date).order('time')),
+        q(() => SB.from('appointments').select('date').eq('shop_id', sid).gte('date', from).lte('date', ymd(new Date())).eq('status', 'geldi'))
       ]);
       DATA.day = day; DATA.week = week;
     } else if (P.tab === 'musteri') {
-      DATA.all = await q(() => SB.from('appointments').select('name,phone,status,price,date').order('date', { ascending: false }).limit(20000));
-    } else if (P.tab === 'para') {
-      const [y, m] = P.month.split('-').map(Number), start = P.month + '-01', end = ymd(new Date(y, m, 0));
+      DATA.all = await q(() => SB.from('appointments').select('name,phone,status,price,date').eq('shop_id', sid).order('date', { ascending: false }).limit(20000));
+    } else if (P.tab === 'kasa') {
+      const [y, m] = P.month.split('-').map(Number), start = ymd(new Date(y, m - 6, 1)), end = ymd(new Date(y, m, 0));
       const [ap, ex] = await Promise.all([
-        q(() => SB.from('appointments').select('service,price').eq('status', 'geldi').gte('date', start).lte('date', end)),
-        q(() => SB.from('expenses').select('*').gte('date', start).lte('date', end).order('date', { ascending: false }))
+        q(() => SB.from('appointments').select('date,service,price').eq('shop_id', sid).eq('status', 'geldi').gte('date', start).lte('date', end).limit(20000)),
+        q(() => SB.from('expenses').select('*').eq('shop_id', sid).gte('date', start).lte('date', end).order('date', { ascending: false }))
       ]);
-      DATA.monthAppts = ap; DATA.expenses = ex;
+      DATA.six = ap; DATA.sixExp = ex;
     }
     render();
   } catch (e) {
-    if (e && /JWT|auth/i.test(e.message || '')) return renderLogin('Oturum süresi doldu, tekrar giriş yapın.');
-    if (!silent) toast('Veriler yüklenemedi, tekrar deneyin.');
+    if (e && /JWT|auth/i.test(e.message || '')) return renderLogin('Oturum süresi doldu, tekrar giriş yap.');
+    if (!silent) toast('Veriler yüklenemedi, tekrar dene.');
   }
 }
 async function mutate(fn, okMsg) {
   try { await q(fn, 2); if (okMsg) toast(okMsg); await refresh(true); return true; }
-  catch (e) { toast('Kaydedilemedi, tekrar deneyin.'); return false; }
+  catch (e) { toast('Kaydedilemedi, tekrar dene.'); return false; }
 }
 
-/* ---------- Görünüm ---------- */
+/* ---------- İskelet ---------- */
 function render() {
-  const tabs = [['gun', 'Randevular'], ['musteri', 'Müşteriler'], ['para', 'Gelir–Gider'], ['ayar', 'Ayarlar']];
-  app().innerHTML = header() + `<div class="tabs" role="tablist">${tabs.map(([k, v]) => `<button role="tab" class="${P.tab === k ? 'on' : ''}" data-tab="${k}">${v}</button>`).join('')}</div><div id="tab" style="display:flex;flex-direction:column;gap:12px"></div>`;
-  app().querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { P.tab = b.dataset.tab; P.edit = null; P.adding = false; if (P.tab === 'ayar') render(); else { document.getElementById('tab').innerHTML = '<p class="loading">Yükleniyor…</p>'; refresh(); } });
-  ({ gun: tabDay, musteri: tabCust, para: tabMoney, ayar: tabSettings })[P.tab](document.getElementById('tab'));
+  const tabs = [['gun', 'Bugün', ICON.today], ['musteri', 'Müşteriler', ICON.people], ['kasa', 'Kasa', ICON.cash], ['ayar', 'Ayarlar', ICON.gear]];
+  tabbar.hidden = false;
+  tabbar.innerHTML = `<div class="tabbar-in">${tabs.map(([k, v, i]) => `<button class="${P.tab === k ? 'on' : ''}" data-tab="${k}" aria-label="${v}">${i}<span>${v}</span></button>`).join('')}</div>`;
+  tabbar.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => {
+    if (P.tab === b.dataset.tab) return;
+    P.tab = b.dataset.tab; P.edit = null; P.adding = false; window.scrollTo(0, 0);
+    if (P.tab === 'ayar') render(); else { app.innerHTML = '<p class="loading">Yükleniyor…</p>'; refresh(); }
+  });
+  ({ gun: tabDay, musteri: tabCust, kasa: tabMoney, ayar: tabSettings })[P.tab]();
+}
+function subBanner() {
+  const d = daysUntil(SHOP.paid_until);
+  return d <= 30 ? `<div class="banner ${d <= 7 ? 'bad' : ''}">Aboneliğin ${d === 0 ? 'bugün' : d + ' gün sonra'} bitiyor (${esc(fmtDs(SHOP.paid_until))}). Yenilemek için Berberim'e yaz.</div>` : '';
 }
 
-function weekBars() {
-  const t = new Date(), arr = [];
-  for (let i = 6; i >= 0; i--) { const d = addDays(t, -i), s = ymd(d); arr.push({ lbl: i === 0 ? 'Bugün' : DSH[d.getDay()], n: DATA.week.filter(a => a.date === s).length, today: i === 0 }); }
-  const mx = Math.max(1, ...arr.map(x => x.n));
-  return `<section class="box"><div class="navd"><h2>Son 7 gün</h2><span class="meta">${arr.reduce((s, x) => s + x.n, 0)} müşteri geldi</span></div>
-  <div class="bars" role="img" aria-label="Son 7 günde gelen müşteri sayısı">${arr.map(x => `<div class="bar ${x.today ? 'today' : ''}"><b>${x.n}</b><i style="height:${Math.max(4, x.n / mx * 80)}px"></i><span>${x.lbl}</span></div>`).join('')}</div></section>`;
-}
+/* ---------- Bugün ---------- */
 const remindText = a => `Merhaba ${a.name.split(' ')[0]}, ${SHOP.name} randevunuzu hatırlatırız: ${fmtD(a.date)}, saat ${hm(a.time)} (${a.service}). Görüşmek üzere ✂️`;
-
-function tabDay(el) {
-  const list = DATA.day, came = list.filter(a => a.status === 'geldi'), inc = came.reduce((s, a) => s + a.price, 0), sv = SHOP.services;
+function tabDay() {
+  const list = DATA.day, came = list.filter(a => a.status === 'geldi'), inc = came.reduce((s, a) => s + a.price, 0);
+  const waiting = list.filter(a => a.status === 'bekliyor').length, sv = SHOP.services, isToday = P.date === ymd(new Date());
   const nowHM = toHM(Math.round((new Date().getHours() * 60 + new Date().getMinutes()) / 15) * 15 % 1440);
-  el.innerHTML = cmdBox() + `
-  <div class="navd"><button class="btn sec sm" id="pv">‹ Önceki</button><b style="text-align:center">${esc(fmtD(P.date))}${P.date === ymd(new Date()) ? '<br><span class="meta">Bugün</span>' : ''}</b><button class="btn sec sm" id="nx">Sonraki ›</button></div>
-  <div class="stats"><div class="stat"><b>${list.filter(a => a.status !== 'iptal').length}</b><span>Randevu</span></div><div class="stat"><b>${came.length}</b><span>Gelen müşteri</span></div><div class="stat"><b class="money">${tl(inc)}</b><span>Günün geliri</span></div></div>
-  <section class="box"><div class="navd"><h2>Randevular</h2><button class="btn sm" id="addT">${P.adding ? 'Kapat' : '+ Kapıdan gelen'}</button></div>
-  ${P.adding ? `<div class="summary" style="display:flex;flex-direction:column;gap:8px">
+  const t = new Date(), week = [];
+  for (let i = 6; i >= 0; i--) { const d = addDays(t, -i), s = ymd(d); week.push({ label: i === 0 ? 'Bugün' : DSH[d.getDay()], value: DATA.week.filter(a => a.date === s).length, hl: i === 0 }); }
+  const m = P.cmdMsg || {};
+  app.innerHTML = `<header class="head"><h1>${esc(SHOP.name)}</h1>
+    <div class="sec-h" style="margin-top:6px"><button class="btn ghost sm" id="pv" aria-label="Önceki gün">‹</button><b>${isToday ? 'Bugün, ' : ''}${esc(fmtD(P.date))}</b><button class="btn ghost sm" id="nx" aria-label="Sonraki gün">›</button></div></header>
+  ${subBanner()}
+  <div class="stats"><div class="stat hero"><b class="money">${tl(inc)}</b><span>${isToday ? 'Bugünün kasası' : 'Günün kasası'}</span></div>
+    <div class="stat"><b>${came.length}</b><span>Gelen</span></div><div class="stat"><b>${waiting}</b><span>Bekleyen</span></div><div class="stat"><b>${list.filter(a => a.status === 'gelmedi').length}</b><span>Gelmeyen</span></div></div>
+  <section class="sec"><h2>Hızlı kayıt</h2>
+    <div class="cmd">${SR ? `<button class="mic ${listening ? 'rec' : ''}" id="mic" aria-label="${listening ? 'Dinlemeyi bitir' : 'Konuşarak kaydet'}">${listening ? ICON.stop : ICON.mic}</button>` : ''}
+      <input id="cmd" placeholder="saat 3'te Ahmet Yılmaz geldi 600" aria-label="Komut"><button class="btn dark" id="cmdGo">Kaydet</button></div>
+    <p class="muted small">${SR ? 'Mikrofona bas ve söyle. ' : ''}Ücret söylemezsen ${tl(SHOP.fee)} yazılır.</p>
+    ${m.ok ? `<div class="note" style="background:var(--ok-soft);color:var(--ok);font-weight:600">✓ ${esc(m.ok)} ${m.undo ? '<button class="link" id="undo">Geri al</button>' : ''}</div>` : ''}${m.err ? `<p class="err">${esc(m.err)}</p>` : ''}
+  </section>
+  <section class="sec"><div class="sec-h"><h2>Randevular</h2><button class="btn ${P.adding ? 'ghost' : 'dark'} sm" id="addT">${P.adding ? 'Vazgeç' : '+ Kapıdan gelen'}</button></div>
+  ${P.adding ? `<div class="card">
     <div class="row"><label for="wN">Ad soyad<input id="wN" maxlength="80"></label><label for="wP">Telefon<input id="wP" type="tel" inputmode="tel" maxlength="20"></label></div>
     <div class="row"><label for="wS">Hizmet<select id="wS">${sv.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')}</select></label>
-    <label for="wF">Ücret (₺)<input id="wF" type="number" inputmode="numeric" value="${FEE}"></label>
-    <label for="wT">Saat<input id="wT" type="time" value="${nowHM}"></label></div>
-    <button class="btn ok" id="wSave">Müşteriyi kaydet (geldi)</button></div>` : ''}
-  <div class="list">${list.map(a => `<div class="item"><div class="t">${hm(a.time)}</div><div class="main">
-    <div><b>${esc(a.name)}</b> ${pill(a.status)}</div><div class="meta">${esc(a.service)} · ${a.dur} dk · ${esc(a.phone || '—')}</div>
-    <div class="acts">${P.edit === a.id ? `<input id="pe" type="number" inputmode="numeric" value="${a.price}" style="width:100px;padding:6px" aria-label="Ücret"><button class="btn ok sm" id="peS">Kaydet</button>` : `<button class="btn sec sm money" data-pe="${a.id}">${tl(a.price)} ✎</button>`}</div>
-    <div class="acts">${a.status !== 'geldi' ? `<button class="btn ok sm" data-st="geldi" data-id="${a.id}">Geldi</button>` : ''}${a.status === 'bekliyor' ? `<button class="btn sec sm" data-st="gelmedi" data-id="${a.id}">Gelmedi</button><button class="btn sec sm" data-st="iptal" data-id="${a.id}">İptal</button>${a.phone ? `<a class="btn sec sm" target="_blank" rel="noopener" href="https://wa.me/${waNum(a.phone)}?text=${encodeURIComponent(remindText(a))}">Hatırlat</a>` : ''}` : `<button class="btn sec sm" data-st="bekliyor" data-id="${a.id}">Geri al</button>`}</div>
-  </div></div>`).join('') || '<p class="empty">Bu gün için randevu yok.</p>'}</div></section>` + weekBars();
-  el.querySelector('#pv').onclick = () => { P.date = ymd(addDays(parseD(P.date), -1)); refresh(); };
-  el.querySelector('#nx').onclick = () => { P.date = ymd(addDays(parseD(P.date), 1)); refresh(); };
-  el.querySelector('#addT').onclick = () => { P.adding = !P.adding; render(); };
-  if (P.adding) el.querySelector('#wSave').onclick = async () => {
-    const n = el.querySelector('#wN').value.trim(), p = el.querySelector('#wP').value.trim(), s = sv.find(x => x.id === el.querySelector('#wS').value), t = el.querySelector('#wT').value;
-    if (n.length < 2 || !t) { toast('İsim ve saat girin.'); return; }
-    if (await mutate(() => SB.from('appointments').insert({ date: P.date, time: t, dur: s.dur, service: s.name, price: Math.max(0, Number(el.querySelector('#wF').value) || FEE), name: n, phone: p, status: 'geldi', source: 'panel' }), 'Kaydedildi')) P.adding = false;
+    <label for="wF">Ücret (₺)<input id="wF" type="number" inputmode="numeric" value="${SHOP.fee}"></label><label for="wT">Saat<input id="wT" type="time" value="${nowHM}"></label></div>
+    <button class="btn ok" id="wSave">Kaydet</button></div>` : ''}
+  <div class="card"><div class="list">${list.map(a => `<div class="item"><div class="t">${hm(a.time)}</div><div class="main">
+    <div><b>${esc(a.name)}</b> ${pill(a.status)}</div><div class="muted">${esc(a.service)}${a.phone ? ' · ' + esc(a.phone) : ''}</div>
+    <div class="acts">${P.edit === a.id ? `<input id="pe" type="number" inputmode="numeric" value="${a.price}" style="width:110px;padding:7px" aria-label="Ücret"><button class="btn ok sm" id="peS">Kaydet</button>` : `<button class="btn ghost sm money" data-pe="${a.id}">${tl(a.price)} ✎</button>`}
+    ${a.status !== 'geldi' ? `<button class="btn ok sm" data-st="geldi" data-id="${a.id}">Geldi</button>` : ''}${a.status === 'bekliyor' ? `<button class="btn ghost sm" data-st="gelmedi" data-id="${a.id}">Gelmedi</button><button class="btn ghost sm" data-st="iptal" data-id="${a.id}">İptal</button>${a.phone ? `<a class="btn ghost sm" target="_blank" rel="noopener" href="https://wa.me/${waNum(a.phone)}?text=${encodeURIComponent(remindText(a))}">Hatırlat</a>` : ''}` : `<button class="btn ghost sm" data-st="bekliyor" data-id="${a.id}">Geri al</button>`}</div>
+  </div></div>`).join('') || '<p class="empty">Bu gün için randevu yok.</p>'}</div></div></section>
+  <section class="sec"><div class="sec-h"><h2>Son 7 gün</h2><span class="muted">${week.reduce((s, x) => s + x.value, 0)} müşteri</span></div>
+    <div class="card">${barChart(week, { aria: 'Son 7 günde gelen müşteri sayısı' })}</div></section>`;
+  const $ = id => document.getElementById(id);
+  $('pv').onclick = () => { P.date = ymd(addDays(parseD(P.date), -1)); refresh(); };
+  $('nx').onclick = () => { P.date = ymd(addDays(parseD(P.date), 1)); refresh(); };
+  $('addT').onclick = () => { P.adding = !P.adding; render(); };
+  if (P.adding) $('wSave').onclick = async () => {
+    const n = $('wN').value.trim(), p = $('wP').value.trim(), s = sv.find(x => x.id === $('wS').value), t = $('wT').value;
+    if (n.length < 2 || !t) { toast('İsim ve saat gir.'); return; }
+    if (await mutate(() => SB.from('appointments').insert({ shop_id: SHOP.id, date: P.date, time: t, dur: s.dur, service: s.name, price: Math.max(0, Number($('wF').value) || SHOP.fee), name: n, phone: p, status: 'geldi', source: 'panel' }), 'Kaydedildi')) { P.adding = false; render(); }
   };
-  el.querySelectorAll('[data-st]').forEach(b => b.onclick = () => mutate(() => SB.from('appointments').update({ status: b.dataset.st }).eq('id', b.dataset.id)));
-  el.querySelectorAll('[data-pe]').forEach(b => b.onclick = () => { P.edit = b.dataset.pe; render(); const i = document.getElementById('pe'); i.focus(); i.select(); });
-  const peS = el.querySelector('#peS');
-  if (peS) { const done = async () => { const id = P.edit, v = Math.max(0, Number(el.querySelector('#pe').value) || 0); P.edit = null; await mutate(() => SB.from('appointments').update({ price: v }).eq('id', id), 'Ücret kaydedildi'); }; peS.onclick = done; el.querySelector('#pe').onkeydown = e => { if (e.key === 'Enter') done(); }; }
-  bindCmd(el);
+  app.querySelectorAll('[data-st]').forEach(b => b.onclick = () => mutate(() => SB.from('appointments').update({ status: b.dataset.st }).eq('id', b.dataset.id)));
+  app.querySelectorAll('[data-pe]').forEach(b => b.onclick = () => { P.edit = b.dataset.pe; render(); const i = $('pe'); i.focus(); i.select(); });
+  if ($('peS')) { const done = async () => { const id = P.edit, v = Math.max(0, Number($('pe').value) || 0); P.edit = null; await mutate(() => SB.from('appointments').update({ price: v }).eq('id', id), 'Ücret kaydedildi'); }; $('peS').onclick = done; $('pe').onkeydown = e => { if (e.key === 'Enter') done(); }; }
+  bindCmd();
 }
 
-function tabCust(el) {
+/* ---------- Müşteriler ---------- */
+function tabCust() {
   const map = {}, today = new Date();
   (DATA.all || []).forEach(a => {
     const k = digits(a.phone) || a.name.toLocaleLowerCase('tr');
@@ -147,83 +174,107 @@ function tabCust(el) {
     if (a.status === 'gelmedi') c.no++;
   });
   let arr = Object.values(map).sort((a, b) => b.visits - a.visits);
-  const total = arr.length, ql = P.q.toLocaleLowerCase('tr');
+  const total = arr.length, loyal = arr.filter(c => c.visits >= 5).length, ql = P.q.toLocaleLowerCase('tr');
   if (ql) arr = arr.filter(c => c.name.toLocaleLowerCase('tr').includes(ql) || (c.phone || '').includes(ql));
-  el.innerHTML = `<div class="navd"><span class="meta">Toplam ${total} müşteri</span></div>
-  <input id="q" placeholder="İsim veya telefon ara" value="${esc(P.q)}" aria-label="Müşteri ara">
-  <section class="box"><div class="list">${arr.slice(0, 300).map(c => {
+  app.innerHTML = `<header class="head"><h1>Müşteriler</h1><p>${total} müşteri · ${loyal} sadık müşteri</p></header>
+  <input id="q" placeholder="İsim veya telefon ara" value="${esc(P.q)}" aria-label="Müşteri ara" type="search">
+  <div class="card"><div class="list">${arr.slice(0, 300).map(c => {
     const days = c.last ? Math.round((today - parseD(c.last)) / 864e5) : null;
-    return `<div class="item"><div class="main"><div><b>${esc(c.name)}</b> ${c.visits >= 5 ? '<span class="pill p-ok">Sadık müşteri</span>' : ''} ${days !== null && days >= 30 ? '<span class="pill p-warn">' + days + ' gündür gelmedi</span>' : ''} ${c.no >= 2 ? '<span class="pill p-no">' + c.no + ' kez gelmedi</span>' : ''}</div>
-    <div class="meta">${esc(c.phone || '—')} · ${c.visits} ziyaret · son: ${c.last ? esc(fmtD(c.last)) : '—'}</div>
-    ${c.phone && days !== null && days >= 30 ? `<div class="acts"><a class="btn sec sm" target="_blank" rel="noopener" href="https://wa.me/${waNum(c.phone)}?text=${encodeURIComponent('Merhaba ' + c.name.split(' ')[0] + ', ' + SHOP.name + ' olarak sizi özledik! Randevu almak ister misiniz? ✂️')}">WhatsApp'tan davet et</a></div>` : ''}</div>
+    return `<div class="item"><div class="main"><div><b>${esc(c.name)}</b> ${c.visits >= 5 ? '<span class="pill p-ok">Sadık</span>' : ''} ${days !== null && days >= 30 ? '<span class="pill p-warn">' + days + ' gündür yok</span>' : ''} ${c.no >= 2 ? '<span class="pill p-no">' + c.no + ' kez gelmedi</span>' : ''}</div>
+    <div class="muted">${c.visits} ziyaret${c.last ? ' · son ' + esc(fmtDs(c.last)) : ''}${c.phone ? ' · ' + esc(c.phone) : ''}</div>
+    ${c.phone && days !== null && days >= 30 ? `<div class="acts"><a class="btn ghost sm" target="_blank" rel="noopener" href="https://wa.me/${waNum(c.phone)}?text=${encodeURIComponent('Merhaba ' + c.name.split(' ')[0] + ', ' + SHOP.name + ' olarak sizi özledik! Randevu için: ' + shopLink(SHOP.slug))}">WhatsApp'tan davet et</a></div>` : ''}</div>
     <div class="money"><b>${tl(c.spent)}</b></div></div>`;
-  }).join('') || '<p class="empty">Henüz müşteri yok.</p>'}</div></section>`;
-  const qi = el.querySelector('#q'); qi.oninput = () => { P.q = qi.value; tabCust(el); const n = el.querySelector('#q'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); };
+  }).join('') || '<p class="empty">Henüz müşteri yok. İlk randevu alındığında burada görünür.</p>'}</div></div>`;
+  const qi = document.getElementById('q'); qi.oninput = () => { P.q = qi.value; tabCust(); const n = document.getElementById('q'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); };
 }
 
-function tabMoney(el) {
-  const [y, mo] = P.month.split('-').map(Number), ap = DATA.monthAppts, ex = DATA.expenses;
+/* ---------- Kasa ---------- */
+function tabMoney() {
+  const [y, mo] = P.month.split('-').map(Number);
+  const inMonth = r => r.date.startsWith(P.month);
+  const ap = DATA.six.filter(inMonth), ex = DATA.sixExp.filter(inMonth);
   const inc = ap.reduce((s, a) => s + a.price, 0), exp = ex.reduce((s, e) => s + Number(e.amount), 0), net = inc - exp;
   const bySvc = {}; ap.forEach(a => { bySvc[a.service] = (bySvc[a.service] || 0) + a.price; });
+  const six = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(y, mo - 1 - i, 1), key = d.getFullYear() + '-' + pad(d.getMonth() + 1);
+    six.push({ label: MONTHS[d.getMonth()].slice(0, 3), value: DATA.six.filter(a => a.date.startsWith(key)).reduce((s, a) => s + a.price, 0), value2: DATA.sixExp.filter(e => e.date.startsWith(key)).reduce((s, e) => s + Number(e.amount), 0), hl: i === 0 });
+  }
   const shift = n => { const d = new Date(y, mo - 1 + n, 1); P.month = d.getFullYear() + '-' + pad(d.getMonth() + 1); refresh(); };
-  el.innerHTML = `
-  <div class="navd"><button class="btn sec sm" id="pm">‹ Önceki</button><b>${MONTHS[mo - 1]} ${y}</b><button class="btn sec sm" id="nm">Sonraki ›</button></div>
-  <div class="stats"><div class="stat"><b class="money" style="color:var(--ok)">${tl(inc)}</b><span>Gelir · ${ap.length} müşteri</span></div><div class="stat"><b class="money" style="color:var(--red)">${tl(exp)}</b><span>Gider</span></div><div class="stat"><b class="money" style="color:${net < 0 ? 'var(--red)' : 'var(--fg)'}">${tl(net)}</b><span>Net kâr</span></div></div>
-  ${inc ? `<section class="box"><h2>Gelir hangi hizmetten?</h2><div class="list">${Object.entries(bySvc).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<div class="item"><div class="main">${esc(k)}<div style="height:6px;border-radius:3px;background:var(--blue-soft);margin-top:6px"><div style="height:6px;border-radius:3px;background:var(--blue);width:${Math.round(v / inc * 100)}%"></div></div></div><div class="money"><b>${tl(v)}</b></div></div>`).join('')}</div></section>` : ''}
-  <section class="box"><h2>Gider ekle</h2>
-    <div class="row"><label for="eD">Açıklama<input id="eD" maxlength="120" placeholder="Örn. Kira, malzeme"></label><label for="eA">Tutar (₺)<input id="eA" type="number" inputmode="decimal" min="0"></label></div>
+  app.innerHTML = `<header class="head"><h1>Kasa</h1>
+    <div class="sec-h" style="margin-top:6px"><button class="btn ghost sm" id="pm" aria-label="Önceki ay">‹</button><b>${MONTHS[mo - 1]} ${y}</b><button class="btn ghost sm" id="nm" aria-label="Sonraki ay">›</button></div></header>
+  <div class="stats"><div class="stat hero"><b class="money">${tl(net)}</b><span>Net kâr</span></div>
+    <div class="stat"><b class="money pos">${tlShort(inc)}</b><span>Gelir</span></div><div class="stat"><b class="money neg">${tlShort(exp)}</b><span>Gider</span></div><div class="stat"><b>${ap.length}</b><span>Müşteri</span></div></div>
+  <section class="sec"><h2>Son 6 ay</h2><div class="card">${barChart(six, { aria: 'Son 6 ay gelir ve gider', short: tlShort, fmt: tl })}
+    <div class="legend"><span><i style="background:var(--blue)"></i>Gelir</span><span><i style="background:var(--muted);opacity:.35"></i>Gider</span></div></div></section>
+  ${inc ? `<section class="sec"><h2>Gelir hangi hizmetten</h2><div class="card"><div class="list">${Object.entries(bySvc).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<div class="item"><div class="main"><div class="sec-h"><span>${esc(k)}</span><b class="money">${tl(v)}</b></div><div class="hbar"><i style="width:${Math.round(v / inc * 100)}%"></i></div></div></div>`).join('')}</div></div></section>` : ''}
+  <section class="sec"><h2>Gider ekle</h2>
+    <div class="row"><label for="eD">Ne için<input id="eD" maxlength="120" placeholder="Kira, malzeme, fatura"></label><label for="eA">Tutar (₺)<input id="eA" type="number" inputmode="decimal" min="0"></label></div>
     <label for="eT">Tarih<input id="eT" type="date" value="${P.month === ymd(new Date()).slice(0, 7) ? ymd(new Date()) : P.month + '-01'}"></label>
-    <button class="btn" id="eAdd">Gideri kaydet</button></section>
-  <section class="box"><h2>Bu ayın giderleri</h2><div class="list">${ex.map(e => `<div class="item"><div class="main"><div>${esc(e.descr)}</div><div class="meta">${esc(fmtD(e.date))}</div></div><div class="money">${tl(e.amount)}</div><button class="btn sec sm" data-del="${e.id}">Sil</button></div>`).join('') || '<p class="empty">Bu ay gider girilmemiş.</p>'}</div></section>`;
-  el.querySelector('#pm').onclick = () => shift(-1); el.querySelector('#nm').onclick = () => shift(1);
-  el.querySelector('#eAdd').onclick = () => {
-    const d = el.querySelector('#eD').value.trim(), a = Number(el.querySelector('#eA').value), t = el.querySelector('#eT').value;
-    if (!d || !(a > 0) || !t) { toast('Açıklama, tutar ve tarih girin.'); return; }
-    mutate(() => SB.from('expenses').insert({ date: t, descr: d, amount: a }), 'Gider kaydedildi');
+    <button class="btn dark" id="eAdd">Gideri kaydet</button></section>
+  <section class="sec"><h2>${MONTHS[mo - 1]} giderleri</h2><div class="card"><div class="list">${ex.map(e => `<div class="item"><div class="main"><div>${esc(e.descr)}</div><div class="muted">${esc(fmtDs(e.date))}</div></div><b class="money">${tl(e.amount)}</b><button class="btn ghost sm" data-del="${e.id}">Sil</button></div>`).join('') || '<p class="empty">Bu ay gider girilmemiş.</p>'}</div></div></section>`;
+  const $ = id => document.getElementById(id);
+  $('pm').onclick = () => shift(-1); $('nm').onclick = () => shift(1);
+  $('eAdd').onclick = () => {
+    const d = $('eD').value.trim(), a = Number($('eA').value), t = $('eT').value;
+    if (!d || !(a > 0) || !t) { toast('Açıklama, tutar ve tarih gir.'); return; }
+    mutate(() => SB.from('expenses').insert({ shop_id: SHOP.id, date: t, descr: d, amount: a }), 'Gider kaydedildi');
   };
-  el.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = 'Emin misin?'; return; } mutate(() => SB.from('expenses').delete().eq('id', b.dataset.del), 'Silindi'); });
+  app.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = 'Emin misin?'; return; } mutate(() => SB.from('expenses').delete().eq('id', b.dataset.del), 'Silindi'); });
 }
 
-function tabSettings(el) {
-  const st = SHOP, link = location.origin + '/';
+/* ---------- Ayarlar ---------- */
+function shopSwitch() { return `<label for="shopSel">Dükkan<select id="shopSel">${SHOPS.map(s => `<option value="${s.id}" ${s.id === SHOP.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>`; }
+function bindSwitch() { const s = document.getElementById('shopSel'); if (s) s.onchange = () => { store.set('berberim_shop', s.value); location.reload(); }; }
+let svcDraft = null;
+function tabSettings() {
+  const st = SHOP, link = shopLink(st.slug);
+  if (!svcDraft) svcDraft = st.services.map(s => ({ ...s }));
   const msg = () => document.getElementById('sM').value.replace(/\{isim\}/g, st.name).replace(/\{link\}/g, link);
-  el.innerHTML = `
-  <section class="box"><h2>Müşteri linki</h2><div class="summary" style="overflow-wrap:anywhere">${esc(link)}</div><button class="btn sec" id="cpL">Linki kopyala</button></section>
-  <section class="box"><h2>Dükkan</h2>
-    <label for="sN">Berber adı<input id="sN" maxlength="60" value="${esc(st.name)}"></label>
-    <div class="row"><label for="sO">Açılış<input id="sO" type="time" value="${st.open_time}"></label><label for="sC">Kapanış<input id="sC" type="time" value="${st.close_time}"></label>
-    <label for="sS">Randevu aralığı<select id="sS"><option value="30" ${st.step == 30 ? 'selected' : ''}>30 dakika</option><option value="45" ${st.step == 45 ? 'selected' : ''}>45 dakika</option></select></label></div>
-    <div><span class="eyebrow" style="color:var(--muted)">Kapalı günler</span><div class="closed">${DSH.map((d, i) => `<label for="cd${i}"><input type="checkbox" id="cd${i}" data-cd="${i}" ${st.closed_days.includes(i) ? 'checked' : ''}>${d}</label>`).join('')}</div></div>
-    <label for="sF">Varsayılan ücret (₺) · müşteri görmez<input id="sF" type="number" inputmode="numeric" value="${FEE}"></label></section>
-  <section class="box"><h2>Hizmetler</h2><div class="svc meta"><span>Hizmet</span><span>Süre (dk)</span></div>
-    ${st.services.map((s, i) => `<div class="svc"><input id="vn${i}" maxlength="40" value="${esc(s.name)}" aria-label="Hizmet adı"><input id="vd${i}" type="number" min="15" step="15" value="${s.dur}" aria-label="Süre"></div>`).join('')}</section>
-  <section class="box"><h2>WhatsApp karşılama mesajı</h2>
-    <p class="meta" style="margin:0">WhatsApp Business → Araçlar → Karşılama mesajı bölümüne yapıştırın.</p>
-    <label for="sM">Mesaj metni<textarea id="sM">${esc(st.msg)}</textarea></label>
-    <div class="summary" id="prev" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
-    <button class="btn sec" id="cp">Mesajı kopyala</button></section>
+  const d = daysUntil(st.paid_until);
+  app.innerHTML = `<header class="head"><h1>Ayarlar</h1></header>
+  ${SHOPS.length > 1 ? shopSwitch() : ''}
+  <section class="sec"><h2>Müşteri linkin</h2><div class="note">${esc(link)}</div><button class="btn dark" id="cpL">Linki kopyala</button></section>
+  <section class="sec"><h2>WhatsApp mesajı</h2><p class="muted small">WhatsApp Business → İşletme araçları → Uzakta mesajı bölümüne yapıştır.</p>
+    <label for="sM">Mesaj<textarea id="sM">${esc(st.msg)}</textarea></label>
+    <div class="note" id="prev" style="white-space:pre-wrap"></div><button class="btn ghost" id="cp">Mesajı kopyala</button></section>
+  <section class="sec"><h2>Dükkan</h2>
+    <label for="sN">Dükkan adı<input id="sN" maxlength="60" value="${esc(st.name)}"></label>
+    <div class="row"><label for="sPh">Telefon<input id="sPh" type="tel" maxlength="25" value="${esc(st.phone)}"></label><label for="sF">Varsayılan ücret (₺)<input id="sF" type="number" inputmode="numeric" value="${st.fee}"></label></div>
+    <label for="sA">Adres<input id="sA" maxlength="160" value="${esc(st.address)}"></label>
+    <p class="muted small">Ücreti müşteriler görmez, sadece kasa hesabında kullanılır.</p></section>
+  <section class="sec"><h2>Çalışma saatleri</h2>
+    <div class="row"><label for="sO">Açılış<input id="sO" type="time" value="${hm(st.open_time)}"></label><label for="sC">Kapanış<input id="sC" type="time" value="${hm(st.close_time)}"></label>
+    <label for="sS">Randevu aralığı<select id="sS">${[15, 20, 30, 45, 60].map(v => `<option value="${v}" ${st.step == v ? 'selected' : ''}>${v} dakika</option>`).join('')}</select></label></div>
+    <div><p class="muted small" style="margin-bottom:6px">Kapalı günler</p><div class="check-row">${[1, 2, 3, 4, 5, 6, 0].map(i => `<label for="cd${i}"><input type="checkbox" id="cd${i}" data-cd="${i}" ${st.closed_days.includes(i) ? 'checked' : ''}>${DSH[i]}</label>`).join('')}</div></div></section>
+  <section class="sec"><h2>Hizmetler</h2><div class="card"><div class="list">${svcDraft.map((s, i) => `<div class="item"><div class="main"><div class="row"><input id="vn${i}" maxlength="40" value="${esc(s.name)}" aria-label="Hizmet adı" style="flex:2 1 140px"><select id="vd${i}" aria-label="Süre" style="flex:1 1 90px">${[10, 15, 20, 30, 40, 45, 60, 75, 90, 120].map(v => `<option value="${v}" ${s.dur == v ? 'selected' : ''}>${v} dk</option>`).join('')}</select></div></div>${svcDraft.length > 1 ? `<button class="btn ghost sm" data-rm="${i}" aria-label="Sil">Sil</button>` : ''}</div>`).join('')}</div>
+    <button class="btn ghost sm" id="addSvc">+ Hizmet ekle</button></div></section>
   <button class="btn" id="sv">Ayarları kaydet</button>
-  <button class="btn sec" id="lo">Çıkış yap</button>`;
-  const prev = el.querySelector('#prev'); prev.textContent = msg();
-  el.querySelector('#sM').oninput = () => { prev.textContent = msg(); };
-  const copy = (text, b) => navigator.clipboard.writeText(text).then(() => toast('Kopyalandı')).catch(() => toast('Kopyalanamadı, metni elle seçin.'));
-  el.querySelector('#cp').onclick = e => copy(msg(), e.target);
-  el.querySelector('#cpL').onclick = e => copy(link, e.target);
-  el.querySelector('#lo').onclick = logout;
-  el.querySelector('#sv').onclick = async () => {
+  <section class="sec"><h2>Abonelik</h2><p class="muted">${d >= 0 ? `${esc(fmtDs(st.paid_until))} tarihine kadar geçerli (${d} gün kaldı).` : 'Süresi doldu.'}</p></section>
+  ${IS_SUPER ? '<a class="btn ghost" href="/patron/">Patron paneli</a>' : ''}
+  <button class="btn ghost" id="lo">Çıkış yap</button>`;
+  const $ = id => document.getElementById(id);
+  const prev = $('prev'); prev.textContent = msg(); $('sM').oninput = () => { prev.textContent = msg(); };
+  const grab = () => svcDraft.forEach((s, i) => { s.name = $('vn' + i).value; s.dur = Number($('vd' + i).value); });
+  $('cp').onclick = () => copyText(msg()); $('cpL').onclick = () => copyText(link); $('lo').onclick = logout; bindSwitch();
+  $('addSvc').onclick = () => { grab(); svcDraft.push({ id: 'h' + Date.now().toString(36), name: '', dur: 30 }); tabSettings(); $('vn' + (svcDraft.length - 1)).focus(); };
+  app.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { grab(); svcDraft.splice(Number(b.dataset.rm), 1); tabSettings(); });
+  $('sv').onclick = async () => {
+    grab();
+    const services = svcDraft.filter(s => s.name.trim()).map(s => ({ id: s.id, name: s.name.trim().slice(0, 40), dur: s.dur }));
+    if (!services.length) { toast('En az bir hizmet olmalı.'); return; }
     const upd = {
-      name: el.querySelector('#sN').value.trim() || st.name, open_time: el.querySelector('#sO').value, close_time: el.querySelector('#sC').value,
-      step: Number(el.querySelector('#sS').value), closed_days: [...el.querySelectorAll('[data-cd]')].filter(c => c.checked).map(c => Number(c.dataset.cd)),
-      services: st.services.map((s, i) => ({ id: s.id, name: el.querySelector('#vn' + i).value.trim() || s.name, dur: Math.max(15, Number(el.querySelector('#vd' + i).value) || s.dur) })),
-      msg: el.querySelector('#sM').value
+      name: $('sN').value.trim() || st.name, phone: $('sPh').value.trim(), address: $('sA').value.trim(),
+      open_time: $('sO').value, close_time: $('sC').value, step: Number($('sS').value),
+      closed_days: [...app.querySelectorAll('[data-cd]')].filter(c => c.checked).map(c => Number(c.dataset.cd)),
+      services, msg: $('sM').value, fee: Math.max(0, Number($('sF').value) || 0)
     };
     if (toMin(upd.close_time) <= toMin(upd.open_time)) { toast('Kapanış saati açılıştan sonra olmalı.'); return; }
-    const fee = Math.max(0, Number(el.querySelector('#sF').value) || FEE);
     try {
-      await q(() => SB.from('shop').update(upd).eq('id', 1), 2);
-      await q(() => SB.from('shop_private').update({ fee }).eq('id', 1), 2);
-      await loadShop(); toast('Ayarlar kaydedildi'); render();
-    } catch (e) { toast('Kaydedilemedi, tekrar deneyin.'); }
+      const r = await q(() => SB.from('shops').update(upd).eq('id', st.id).select('*'), 2);
+      if (!r || !r.length) throw new Error('yok');
+      SHOP = r[0]; SHOPS = SHOPS.map(s => s.id === SHOP.id ? SHOP : s); svcDraft = null; toast('Ayarlar kaydedildi'); render();
+    } catch (e) { toast('Kaydedilemedi, tekrar dene.'); }
   };
 }
 
@@ -238,6 +289,7 @@ function parseCmd(raw) {
   let time = null;
   const m = t.match(/(?:saat\s*)?(\d{1,2})(?:[:.\s](\d{2}))?\s*(?:'?\s*(?:da|de|ta|te|ya|ye|a|e))?(?=\s)/);
   if (m && Number(m[1]) <= 23) { let h = Number(m[1]); if (h >= 1 && h <= 7) h += 12; time = pad(h) + ':' + pad(Number(m[2] || 0)); t = t.replace(m[0], ' '); }
+  if (price == null) { const n = t.match(/\s(\d{2,5})\s/); if (n) { price = Number(n[1]); t = t.replace(n[0], ' '); } }
   if (!time) { const n = new Date(); time = pad(n.getHours()) + ':' + pad(Math.floor(n.getMinutes() / 15) * 15); }
   let status = 'geldi'; if (/gelmedi|gelmeyecek/.test(t)) status = 'gelmedi'; else if (/iptal/.test(t)) status = 'iptal';
   const sv = SHOP.services; let service = null;
@@ -248,43 +300,36 @@ function parseCmd(raw) {
 }
 async function runCmd(text) {
   const c = parseCmd(text), list = DATA.day.filter(a => a.status !== 'iptal'), nm = c.name.toLocaleLowerCase('tr');
-  let a = list.find(x => hm(x.time) === c.time) || (nm ? list.find(x => x.name.toLocaleLowerCase('tr').includes(nm.split(' ')[0])) : null);
+  const a = list.find(x => hm(x.time) === c.time) || (nm ? list.find(x => x.name.toLocaleLowerCase('tr').includes(nm.split(' ')[0])) : null);
   try {
     if (a) {
       const upd = { status: c.status }; if (c.price != null) upd.price = c.price; if (c.service) { upd.service = c.service.name; upd.dur = c.service.dur; }
       await q(() => SB.from('appointments').update(upd).eq('id', a.id), 2);
-      P.cmdMsg = { ok: `${hm(a.time)} · ${a.name} · ${{ geldi: 'geldi', gelmedi: 'gelmedi', iptal: 'iptal edildi' }[c.status]}${c.status === 'geldi' ? ' · ' + tl(c.price ?? a.price) : ''}`, undo: { id: a.id, prev: { status: a.status, price: a.price, service: a.service, dur: a.dur } } };
+      P.cmdMsg = { ok: `${hm(a.time)} ${a.name}: ${{ geldi: 'geldi', gelmedi: 'gelmedi', iptal: 'iptal edildi' }[c.status]}${c.status === 'geldi' ? ', ' + tl(c.price ?? a.price) : ''}`, undo: { id: a.id, prev: { status: a.status, price: a.price, service: a.service, dur: a.dur } } };
     } else {
       if (c.status !== 'geldi') { P.cmdMsg = { err: 'Bu saatte veya bu isimde randevu bulunamadı.' }; render(); return; }
       const sv = c.service || SHOP.services[0];
-      const row = { date: P.date, time: c.time, dur: sv.dur, service: sv.name, price: c.price ?? FEE, name: c.name.length >= 2 ? c.name : 'Kapıdan gelen müşteri', phone: '', status: 'geldi', source: 'panel' };
+      const row = { shop_id: SHOP.id, date: P.date, time: c.time, dur: sv.dur, service: sv.name, price: c.price ?? SHOP.fee, name: c.name.length >= 2 ? c.name : 'Kapıdan gelen', phone: '', status: 'geldi', source: 'panel' };
       const ins = await q(() => SB.from('appointments').insert(row).select('id'), 2);
-      P.cmdMsg = { ok: `${row.time} · ${row.name} · geldi · ${tl(row.price)} (yeni kayıt)`, undo: { id: ins[0].id, del: true } };
+      P.cmdMsg = { ok: `${row.time} ${row.name}: geldi, ${tl(row.price)} (yeni kayıt)`, undo: { id: ins[0].id, del: true } };
     }
-  } catch (e) { P.cmdMsg = { err: 'Kaydedilemedi, tekrar deneyin.' }; }
+  } catch (e) { P.cmdMsg = { err: 'Kaydedilemedi, tekrar dene.' }; }
   await refresh(true);
 }
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, listening = false;
-function cmdBox() {
-  const m = P.cmdMsg || {};
-  return `<section class="box cmd"><div class="navd"><h2>Hızlı komut</h2>${SR ? `<button class="btn sm mic ${listening ? 'rec' : ''}" id="mic">${listening ? '■ Dinliyorum' : '🎤 Konuş'}</button>` : ''}</div>
-  <div class="row" style="flex-wrap:nowrap"><input id="cmd" placeholder="Örn: saat 3'te Ahmet Yılmaz geldi 600 lira" aria-label="Komut" style="min-width:0"><button class="btn ok" id="cmdGo" style="flex:0 0 auto;min-width:0">Uygula</button></div>
-  <p class="meta" style="margin:0">${SR ? 'Mikrofona bas ve söyle. ' : 'Klavyedeki mikrofon tuşuyla da söyleyebilirsin. '}Ücret söylemezsen ${tl(FEE)} yazılır.</p>
-  ${m.ok ? `<div class="summary" style="background:var(--ok-soft);color:var(--ok)">✓ ${esc(m.ok)} ${m.undo ? '<button class="btn sec sm" id="undo">Geri al</button>' : ''}</div>` : ''}${m.err ? `<p class="err">${esc(m.err)}</p>` : ''}</section>`;
-}
-function bindCmd(el) {
-  const inp = el.querySelector('#cmd'), go = () => { if (inp.value.trim()) { const v = inp.value.trim(); inp.value = ''; runCmd(v); } };
-  el.querySelector('#cmdGo').onclick = go; inp.onkeydown = e => { if (e.key === 'Enter') go(); };
-  const u = el.querySelector('#undo');
+function bindCmd() {
+  const inp = document.getElementById('cmd'), go = () => { const v = inp.value.trim(); if (v) { inp.value = ''; runCmd(v); } };
+  document.getElementById('cmdGo').onclick = go; inp.onkeydown = e => { if (e.key === 'Enter') go(); };
+  const u = document.getElementById('undo');
   if (u) u.onclick = async () => { const x = P.cmdMsg.undo; P.cmdMsg = null; await mutate(() => x.del ? SB.from('appointments').delete().eq('id', x.id) : SB.from('appointments').update(x.prev).eq('id', x.id), 'Geri alındı'); };
-  const mic = el.querySelector('#mic');
+  const mic = document.getElementById('mic');
   if (mic) mic.onclick = () => {
     if (listening && rec) { rec.stop(); return; }
     rec = new SR(); rec.lang = 'tr-TR'; rec.interimResults = true; rec.maxAlternatives = 1;
     let finalText = '';
     rec.onresult = e => { let interim = ''; for (let i = e.resultIndex; i < e.results.length; i++) { if (e.results[i].isFinal) finalText += e.results[i][0].transcript; else interim += e.results[i][0].transcript; } const i2 = document.getElementById('cmd'); if (i2) i2.value = finalText + interim; };
-    rec.onerror = e => { listening = false; P.cmdMsg = { err: e.error === 'not-allowed' ? 'Mikrofon izni verilmedi; tarayıcı ayarlarından izin ver veya komutu yaz.' : 'Ses anlaşılamadı, tekrar dene.' }; render(); };
+    rec.onerror = e => { listening = false; P.cmdMsg = { err: e.error === 'not-allowed' ? 'Mikrofon izni verilmedi. Tarayıcı ayarlarından izin ver ya da komutu yaz.' : 'Ses anlaşılamadı, tekrar dene.' }; render(); };
     rec.onend = () => { const was = listening; listening = false; const i2 = document.getElementById('cmd'); const v = (i2 && i2.value.trim()) || finalText.trim(); if (was && v) runCmd(v); else render(); };
     try { rec.start(); listening = true; render(); } catch (e) { listening = false; }
   };
